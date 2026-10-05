@@ -1,0 +1,72 @@
+app:
+  id: ari:cloud:ecosystem::app/0993c0df-83c9-4b5e-8b75-650b10d7d1f2
+  runtime:
+    name: nodejs22.x
+
+modules:
+  jira:dashboardGadget:
+    - key: crossdesk4jira-gadget
+      title: Cross-Site Work Items
+      description: Aggregates Jira issues across multiple Atlassian Cloud sites and accounts.
+      resource: main-gadget
+      edit:
+        resource: main-gadget
+      resolver:
+        function: gadget-resolver
+
+  function:
+    - key: gadget-resolver
+      handler: index.handler
+
+resources:
+  - key: main-gadget
+    path: static/gadget/dist
+
+remotes:
+  - key: atlassian-auth
+    baseUrl: https://auth.atlassian.com
+  - key: atlassian-apis
+    baseUrl: https://api.atlassian.com
+
+providers:
+  auth:
+    - key: atlassian-oauth
+      name: Atlassian OAuth
+      type: oauth2
+      clientId: ${ATLASSIAN_CLIENT_ID}
+      clientSecret: ${ATLASSIAN_CLIENT_SECRET}
+      remotes:
+        - atlassian-auth
+        - atlassian-apis
+      bearerMethod: authorization-header
+      actions:
+        authorization:
+          remote: atlassian-auth
+          path: /authorize
+          queryParameters:
+            audience: api.atlassian.com
+            prompt: consent
+        exchangeToken:
+          remote: atlassian-auth
+          path: /oauth/token
+        revokeToken:
+          remote: atlassian-auth
+          path: /oauth/token/revoke
+        retrieveProfile:
+          remote: atlassian-apis
+          path: /me
+          resolvers:
+            id: account_id
+            displayName: email
+      scopes:
+        - read:jira-work
+        - read:jira-user
+        - read:me
+        - offline_access
+
+permissions:
+  external:
+    fetch:
+      backend:
+        - address: https://auth.atlassian.com
+        - address: https://api.atlassian.com
