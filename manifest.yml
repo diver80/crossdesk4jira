@@ -18,6 +18,9 @@ modules:
   function:
     - key: gadget-resolver
       handler: index.handler
+      providers:
+        auth:
+          - atlassian-oauth
 
 resources:
   - key: main-gadget
