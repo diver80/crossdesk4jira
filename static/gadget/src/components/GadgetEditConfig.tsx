@@ -1,4 +1,4 @@
-import { useEffect, useState, ChangeEvent } from 'react';
+import { useEffect, useState, ChangeEvent, FocusEvent } from 'react';
 import { invoke, view } from '@forge/bridge';
 import Button from '@atlaskit/button/new';
 import Textfield from '@atlaskit/textfield';
@@ -25,6 +25,8 @@ export default function GadgetEditConfig() {
   const [saving, setSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [awaitingSignIn, setAwaitingSignIn] = useState(false);
+  const [signInUrl, setSignInUrl] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
   const [refreshingAccounts, setRefreshingAccounts] = useState(false);
   const [connectedAccounts, setConnectedAccounts] = useState<ConnectedAccount[]>([]);
 
@@ -101,7 +103,8 @@ export default function GadgetEditConfig() {
     try {
       setConnectingAccount(true);
       setErrorMessage(null);
-      await openAtlassianSignIn();
+      setSignInUrl(await openAtlassianSignIn());
+      setCopied(false);
       setAwaitingSignIn(true);
     } catch (err: any) {
       console.error('Failed to link Atlassian account:', err);
@@ -109,6 +112,17 @@ export default function GadgetEditConfig() {
       setErrorMessage(`Failed to connect Atlassian account: ${detail}`);
     } finally {
       setConnectingAccount(false);
+    }
+  };
+
+  const handleCopySignInUrl = async () => {
+    if (!signInUrl) return;
+    try {
+      await navigator.clipboard.writeText(signInUrl);
+      setCopied(true);
+    } catch {
+      // Clipboard may be blocked inside the iframe; the field stays selectable.
+      setCopied(false);
     }
   };
 
@@ -315,6 +329,28 @@ export default function GadgetEditConfig() {
               <p style={{ marginBottom: '8px' }}>
                 Approve access on the Atlassian consent screen, then come back here and refresh.
               </p>
+              {signInUrl && (
+                <div style={{ marginBottom: '12px' }}>
+                  <p style={{ fontSize: '12px', marginBottom: '4px' }}>
+                    <strong>Connecting a different Atlassian account?</strong> Open this link in a private window
+                    (or another browser profile) and sign in there. You stay logged in here. The link is valid
+                    for 10 minutes and works once.
+                  </p>
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <div style={{ flex: 1 }}>
+                      <Textfield
+                        isReadOnly
+                        isCompact
+                        value={signInUrl}
+                        onFocus={(e: FocusEvent<HTMLInputElement>) => e.target.select()}
+                      />
+                    </div>
+                    <Button appearance="default" onClick={handleCopySignInUrl}>
+                      {copied ? 'Copied ✓' : 'Copy link'}
+                    </Button>
+                  </div>
+                </div>
+              )}
               <Button appearance="primary" onClick={handleRefreshAccounts} isDisabled={refreshingAccounts}>
                 {refreshingAccounts ? 'Refreshing...' : "I've signed in, refresh"}
               </Button>
