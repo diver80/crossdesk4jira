@@ -1,7 +1,7 @@
 import Resolver from '@forge/resolver';
 import api from '@forge/api';
-import { getAllAccessibleSites } from './resolvers/sites.js';
-import { getGadgetIssues } from './resolvers/issues.js';
+import { getAllAccessibleSites } from './resolvers/sites';
+import { getGadgetIssues } from './resolvers/issues';
 
 const resolver = new Resolver();
 

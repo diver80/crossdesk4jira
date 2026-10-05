@@ -1,5 +1,5 @@
 app:
-  id: ari:cloud:ecosystem::app/0993c0df-83c9-4b5e-8b75-650b10d7d1f2
+  id: ari:cloud:ecosystem::app/8014e024-841c-4e53-8347-e9ea99323fd7
   runtime:
     name: nodejs22.x
 
@@ -8,6 +8,7 @@ modules:
     - key: crossdesk4jira-gadget
       title: Cross-Site Work Items
       description: Aggregates Jira issues across multiple Atlassian Cloud sites and accounts.
+      thumbnail: https://developer.atlassian.com/platform/forge/images/icons/issue.svg
       resource: main-gadget
       edit:
         resource: main-gadget
@@ -34,7 +35,6 @@ providers:
       name: Atlassian OAuth
       type: oauth2
       clientId: ${ATLASSIAN_CLIENT_ID}
-      clientSecret: ${ATLASSIAN_CLIENT_SECRET}
       remotes:
         - atlassian-auth
         - atlassian-apis
@@ -46,7 +46,7 @@ providers:
           queryParameters:
             audience: api.atlassian.com
             prompt: consent
-        exchangeToken:
+        exchange:
           remote: atlassian-auth
           path: /oauth/token
         revokeToken:

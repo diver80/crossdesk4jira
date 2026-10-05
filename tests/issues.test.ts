@@ -71,7 +71,7 @@ describe('aggregateIssuesFromSites', () => {
       ]
     };
 
-    const mockProvider = {
+    const mockProvider: any = {
       asAccount: jest.fn().mockReturnValue({
         fetch: jest.fn().mockResolvedValue({
           ok: true,
@@ -115,7 +115,7 @@ describe('aggregateIssuesFromSites', () => {
       visibleColumns: ['status']
     };
 
-    const mockProvider = {
+    const mockProvider: any = {
       asAccount: jest.fn().mockImplementation((accountId: string) => ({
         fetch: jest.fn().mockImplementation(() => {
           if (accountId === 'acc-1') {

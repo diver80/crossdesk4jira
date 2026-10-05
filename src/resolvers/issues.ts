@@ -5,9 +5,9 @@ import {
   NormalizedIssue,
   SelectedSite,
   SiteResult
-} from '../types.js';
-import { extractAdfText } from '../utils/adf.js';
-import { ForgeAuthProvider } from './sites.js';
+} from '../types';
+import { extractAdfText } from '../utils/adf';
+import { ForgeAuthProvider } from './sites';
 
 interface RawIssueResponse {
   issues?: Array<{

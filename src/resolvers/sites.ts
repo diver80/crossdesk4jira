@@ -1,5 +1,5 @@
 import api from '@forge/api';
-import { AccessibleSite } from '../types.js';
+import { AccessibleSite } from '../types';
 
 interface ProviderAccount {
   id: string;
