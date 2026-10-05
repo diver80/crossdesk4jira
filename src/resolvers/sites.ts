@@ -1,5 +1,5 @@
-import api from '@forge/api';
 import { AccessibleSite } from '../types';
+import { HttpResponse } from '../oauth/types';
 
 interface ProviderAccount {
   id: string;
@@ -17,7 +17,7 @@ interface RawAccessibleResource {
 export interface ForgeAuthProvider {
   listAccounts(): Promise<ProviderAccount[]>;
   asAccount(accountId: string): {
-    fetch(path: string, init?: RequestInit): Promise<Response>;
+    fetch(path: string): Promise<HttpResponse>;
   };
 }
 
@@ -66,9 +66,4 @@ export async function fetchSitesForAccounts(provider: ForgeAuthProvider): Promis
   }
 
   return results;
-}
-
-export async function getAllAccessibleSites(): Promise<AccessibleSite[]> {
-  const provider = api.asUser().withProvider('atlassian-oauth', 'atlassian-apis') as unknown as ForgeAuthProvider;
-  return fetchSitesForAccounts(provider);
 }

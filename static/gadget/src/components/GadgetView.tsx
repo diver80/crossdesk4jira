@@ -8,6 +8,7 @@ import DynamicTable from '@atlaskit/dynamic-table';
 import Tooltip from '@atlaskit/tooltip';
 import Badge from '@atlaskit/badge';
 import { GadgetIssuesResponse, NormalizedIssue, SiteResult } from '../types';
+import { openAtlassianSignIn } from '../oauth';
 
 export default function GadgetView() {
   const [loading, setLoading] = useState(true);
@@ -15,6 +16,7 @@ export default function GadgetView() {
   const [data, setData] = useState<GadgetIssuesResponse | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [reauthorizing, setReauthorizing] = useState(false);
+  const [awaitingSignIn, setAwaitingSignIn] = useState(false);
 
   const fetchIssues = useCallback(async (isRefresh = false) => {
     if (isRefresh) {
@@ -43,10 +45,11 @@ export default function GadgetView() {
   const handleReauth = async () => {
     try {
       setReauthorizing(true);
-      await invoke('connectAccount');
-      await fetchIssues(true);
+      await openAtlassianSignIn();
+      setAwaitingSignIn(true);
     } catch (err: any) {
       console.error('Re-authentication failed:', err);
+      setErrorMessage(`Could not start sign-in: ${err?.message || 'unknown error'}`);
     } finally {
       setReauthorizing(false);
     }
@@ -317,6 +320,26 @@ export default function GadgetView() {
       </div>
 
       {/* Partial Site Error Banners */}
+      {awaitingSignIn && (
+        <div style={{ marginBottom: '12px' }}>
+          <SectionMessage appearance="information" title="Finish signing in in the new tab">
+            <p style={{ margin: '0 0 8px', fontSize: '12px' }}>
+              Approve access on the Atlassian consent screen, then refresh this gadget.
+            </p>
+            <Button
+              appearance="primary"
+              spacing="compact"
+              onClick={() => {
+                setAwaitingSignIn(false);
+                fetchIssues(true);
+              }}
+            >
+              I've signed in, refresh
+            </Button>
+          </SectionMessage>
+        </div>
+      )}
+
       {siteErrors.length > 0 && (
         <div style={{ marginBottom: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
           {siteErrors.map(errSite => (

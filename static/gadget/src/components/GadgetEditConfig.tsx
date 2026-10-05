@@ -7,6 +7,7 @@ import Spinner from '@atlaskit/spinner';
 import SectionMessage from '@atlaskit/section-message';
 import Badge from '@atlaskit/badge';
 import { AccessibleSite, GadgetConfiguration, SelectedSite } from '../types';
+import { ConnectedAccount, CONNECTED_APPS_URL, openAtlassianSignIn } from '../oauth';
 
 const DEFAULT_JQL = 'assignee = currentUser() AND resolution = Unresolved ORDER BY updated DESC';
 
@@ -23,6 +24,9 @@ export default function GadgetEditConfig() {
   const [connectingAccount, setConnectingAccount] = useState(false);
   const [saving, setSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [awaitingSignIn, setAwaitingSignIn] = useState(false);
+  const [refreshingAccounts, setRefreshingAccounts] = useState(false);
+  const [connectedAccounts, setConnectedAccounts] = useState<ConnectedAccount[]>([]);
 
   // Form State
   const [clusterTitle, setClusterTitle] = useState('Cross-Site Work Items');
@@ -76,10 +80,15 @@ export default function GadgetEditConfig() {
 
   const fetchSites = async () => {
     try {
-      const sites = (await invoke('getAllAccessibleSites')) as AccessibleSite[];
+      const [accounts, sites] = await Promise.all([
+        invoke('getConnectedAccounts') as Promise<ConnectedAccount[]>,
+        invoke('getAllAccessibleSites') as Promise<AccessibleSite[]>
+      ]);
+      setConnectedAccounts(accounts || []);
       setAccessibleSites(sites || []);
     } catch (err: any) {
       console.error('Failed to discover sites:', err);
+      setErrorMessage(err?.message || 'Failed to load connected accounts.');
       setAccessibleSites([]);
     }
   };
@@ -92,15 +101,33 @@ export default function GadgetEditConfig() {
     try {
       setConnectingAccount(true);
       setErrorMessage(null);
-      await invoke('connectAccount');
-      // After OAuth flow completes, refresh sites
-      await fetchSites();
+      await openAtlassianSignIn();
+      setAwaitingSignIn(true);
     } catch (err: any) {
       console.error('Failed to link Atlassian account:', err);
       const detail = err?.message || (typeof err === 'string' ? err : 'Please try again.');
       setErrorMessage(`Failed to connect Atlassian account: ${detail}`);
     } finally {
       setConnectingAccount(false);
+    }
+  };
+
+  const handleRefreshAccounts = async () => {
+    setRefreshingAccounts(true);
+    setErrorMessage(null);
+    await fetchSites();
+    setAwaitingSignIn(false);
+    setRefreshingAccounts(false);
+  };
+
+  const handleDisconnect = async (accountId: string) => {
+    try {
+      setErrorMessage(null);
+      await invoke('disconnectAccount', { accountId });
+      setSelectedSiteKeys(prev => new Set([...prev].filter(k => !k.startsWith(`${accountId}::`))));
+      await fetchSites();
+    } catch (err: any) {
+      setErrorMessage(`Failed to disconnect account: ${err?.message || 'unknown error'}`);
     }
   };
 
@@ -184,8 +211,12 @@ export default function GadgetEditConfig() {
     );
   }
 
-  // Group sites by account
+  // Group sites under every connected account, including accounts whose
+  // token no longer works (they have no sites but must stay visible).
   const accountsMap = new Map<string, { email: string; sites: AccessibleSite[] }>();
+  for (const acc of connectedAccounts) {
+    accountsMap.set(acc.id, { email: acc.email, sites: [] });
+  }
   for (const site of accessibleSites) {
     if (!accountsMap.has(site.accountId)) {
       accountsMap.set(site.accountId, { email: site.accountEmail, sites: [] });
@@ -264,39 +295,63 @@ export default function GadgetEditConfig() {
           <label style={{ fontWeight: 600, fontSize: '12px', color: '#6B778C' }}>
             Connected Atlassian Accounts & Target Sites
           </label>
-          <Button
-            appearance="subtle"
-            onClick={handleConnectAccount}
-            isDisabled={connectingAccount}
-          >
-            {connectingAccount ? 'Connecting...' : '+ Connect Another Account'}
-          </Button>
+          <div style={{ display: 'flex', gap: '4px' }}>
+            <Button appearance="subtle" onClick={handleRefreshAccounts} isDisabled={refreshingAccounts}>
+              {refreshingAccounts ? 'Refreshing...' : '↻ Refresh'}
+            </Button>
+            <Button
+              appearance="subtle"
+              onClick={handleConnectAccount}
+              isDisabled={connectingAccount}
+            >
+              {connectingAccount ? 'Opening...' : '+ Connect Another Account'}
+            </Button>
+          </div>
         </div>
+
+        {awaitingSignIn && (
+          <div style={{ marginBottom: '12px' }}>
+            <SectionMessage appearance="information" title="Finish signing in in the new tab">
+              <p style={{ marginBottom: '8px' }}>
+                Approve access on the Atlassian consent screen, then come back here and refresh.
+              </p>
+              <Button appearance="primary" onClick={handleRefreshAccounts} isDisabled={refreshingAccounts}>
+                {refreshingAccounts ? 'Refreshing...' : "I've signed in, refresh"}
+              </Button>
+            </SectionMessage>
+          </div>
+        )}
 
         {accounts.length === 0 ? (
           <SectionMessage appearance="warning" title="No Atlassian Accounts Connected">
             <p style={{ marginBottom: '12px' }}>
-              Connect your Atlassian account via OAuth 2.0 to discover and monitor Jira sites.
+              Sign in with Atlassian to choose which Jira sites this gadget reads from. Access is read-only,
+              stored only for you, and can be revoked any time under{' '}
+              <a href={CONNECTED_APPS_URL} target="_blank" rel="noreferrer">Connected apps</a>.
             </p>
             <Button
               appearance="primary"
               onClick={handleConnectAccount}
               isDisabled={connectingAccount}
             >
-              {connectingAccount ? 'Connecting...' : 'Connect Atlassian Account'}
+              {connectingAccount ? 'Opening...' : 'Connect Atlassian Account'}
             </Button>
           </SectionMessage>
         ) : (
           <div style={{ border: '1px solid #DFE1E6', borderRadius: '4px', padding: '12px', background: '#FAFBFC' }}>
             {accounts.map(([accId, acc]) => (
               <div key={accId} style={{ marginBottom: '16px' }}>
-                <div style={{ fontWeight: 600, fontSize: '13px', color: '#091E42', marginBottom: '8px' }}>
-                  👤 {acc.email}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                  <span style={{ fontWeight: 600, fontSize: '13px', color: '#091E42' }}>👤 {acc.email}</span>
+                  <Button appearance="subtle" spacing="compact" onClick={() => handleDisconnect(accId)}>
+                    Disconnect
+                  </Button>
                 </div>
                 <div style={{ paddingLeft: '16px' }}>
                   {acc.sites.length === 0 ? (
                     <p style={{ fontSize: '12px', color: '#6B778C', fontStyle: 'italic' }}>
-                      No accessible Jira Cloud sites found for this identity.
+                      No accessible Jira sites found. If this account used to work, its access may have
+                      expired or been revoked. Disconnect it and connect again.
                     </p>
                   ) : (
                     acc.sites.map(site => {

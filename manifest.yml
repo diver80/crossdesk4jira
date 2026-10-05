@@ -15,59 +15,27 @@ modules:
       resolver:
         function: gadget-resolver
 
+  # OAuth 2.0 (3LO) redirect target. Forge External Auth rejects Atlassian OAuth
+  # clients, so the code exchange is handled by the app itself (see src/oauth).
+  webtrigger:
+    - key: oauth-callback
+      function: oauth-callback-fn
+      response:
+        type: dynamic
+
   function:
     - key: gadget-resolver
       handler: index.handler
-      providers:
-        auth:
-          - atlassian-oauth
+    - key: oauth-callback-fn
+      handler: index.oauthCallback
 
 resources:
   - key: main-gadget
     path: static/gadget/dist
 
-remotes:
-  - key: atlassian-auth
-    baseUrl: https://auth.atlassian.com
-  - key: atlassian-apis
-    baseUrl: https://api.atlassian.com
-
-providers:
-  auth:
-    - key: atlassian-oauth
-      name: Atlassian OAuth
-      type: oauth2
-      clientId: W6bexVMIB1sUaTTlZzf3isETt9noIxW2
-      remotes:
-        - atlassian-auth
-        - atlassian-apis
-      bearerMethod: authorization-header
-      actions:
-        authorization:
-          remote: atlassian-auth
-          path: /authorize
-          queryParameters:
-            audience: api.atlassian.com
-            prompt: consent
-        exchange:
-          remote: atlassian-auth
-          path: /oauth/token
-        revokeToken:
-          remote: atlassian-auth
-          path: /oauth/token/revoke
-        retrieveProfile:
-          remote: atlassian-apis
-          path: /me
-          resolvers:
-            id: account_id
-            displayName: email
-      scopes:
-        - read:jira-work
-        - read:jira-user
-        - read:me
-        - offline_access
-
 permissions:
+  scopes:
+    - storage:app
   external:
     fetch:
       backend:

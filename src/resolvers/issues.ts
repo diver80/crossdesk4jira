@@ -1,4 +1,3 @@
-import api from '@forge/api';
 import {
   GadgetConfiguration,
   GadgetIssuesResponse,
@@ -213,10 +212,4 @@ export async function aggregateIssuesFromSites(
     visibleColumns: config.visibleColumns,
     results
   };
-}
-
-export async function getGadgetIssues(req: any): Promise<GadgetIssuesResponse> {
-  const config = req.context?.extension?.gadgetConfiguration as GadgetConfiguration | undefined;
-  const provider = api.asUser().withProvider('atlassian-oauth', 'atlassian-apis') as unknown as ForgeAuthProvider;
-  return aggregateIssuesFromSites(config, provider);
 }
