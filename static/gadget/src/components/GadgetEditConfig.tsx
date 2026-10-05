@@ -97,7 +97,8 @@ export default function GadgetEditConfig() {
       await fetchSites();
     } catch (err: any) {
       console.error('Failed to link Atlassian account:', err);
-      setErrorMessage('Failed to connect Atlassian account. Please try again.');
+      const detail = err?.message || (typeof err === 'string' ? err : 'Please try again.');
+      setErrorMessage(`Failed to connect Atlassian account: ${detail}`);
     } finally {
       setConnectingAccount(false);
     }

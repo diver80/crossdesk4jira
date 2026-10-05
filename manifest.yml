@@ -37,7 +37,7 @@ providers:
     - key: atlassian-oauth
       name: Atlassian OAuth
       type: oauth2
-      clientId: ${ATLASSIAN_CLIENT_ID}
+      clientId: W6bexVMIB1sUaTTlZzf3isETt9noIxW2
       remotes:
         - atlassian-auth
         - atlassian-apis
