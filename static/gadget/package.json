@@ -1,0 +1,37 @@
+{
+  "name": "crossdesk4jira-gadget-ui",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@atlaskit/badge": "^18.6.0",
+    "@atlaskit/button": "^23.11.4",
+    "@atlaskit/checkbox": "^19.2.4",
+    "@atlaskit/css-reset": "^7.4.5",
+    "@atlaskit/dynamic-table": "^18.4.1",
+    "@atlaskit/form": "^15.5.5",
+    "@atlaskit/heading": "^5.4.2",
+    "@atlaskit/lozenge": "^13.8.1",
+    "@atlaskit/primitives": "^19.0.1",
+    "@atlaskit/section-message": "^8.12.14",
+    "@atlaskit/spinner": "^20.4.4",
+    "@atlaskit/textfield": "^10.2.6",
+    "@atlaskit/tokens": "^13.0.4",
+    "@atlaskit/tooltip": "^24.4.0",
+    "@forge/bridge": "^5.16.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.79",
+    "@types/react-dom": "^18.2.25",
+    "@vitejs/plugin-react": "^4.2.1",
+    "typescript": "^5.4.5",
+    "vite": "^5.2.10"
+  }
+}
