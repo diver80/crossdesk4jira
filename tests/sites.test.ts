@@ -7,8 +7,9 @@ describe('fetchSitesForAccounts', () => {
       asAccount: jest.fn()
     };
 
-    const sites = await fetchSitesForAccounts(mockProvider as any);
-    expect(sites).toEqual([]);
+    const res = await fetchSitesForAccounts(mockProvider as any);
+    expect(res.sites).toEqual([]);
+    expect(res.accountErrors).toEqual([]);
     expect(mockProvider.listAccounts).toHaveBeenCalledTimes(1);
   });
 
@@ -45,9 +46,10 @@ describe('fetchSitesForAccounts', () => {
       })
     };
 
-    const sites = await fetchSitesForAccounts(mockProvider as any);
-    expect(sites).toHaveLength(1);
-    expect(sites[0]).toEqual({
+    const res = await fetchSitesForAccounts(mockProvider as any);
+    expect(res.sites).toHaveLength(1);
+    expect(res.accountErrors).toEqual([]);
+    expect(res.sites[0]).toEqual({
       accountId: 'acc-1',
       accountEmail: 'dev@company.com',
       siteId: 'site-1',
@@ -79,8 +81,32 @@ describe('fetchSitesForAccounts', () => {
       })
     };
 
-    const sites = await fetchSitesForAccounts(mockProvider as any);
-    expect(sites).toHaveLength(1);
-    expect(sites[0].hasJiraAccess).toBe(false);
+    const res = await fetchSitesForAccounts(mockProvider as any);
+    expect(res.sites).toHaveLength(1);
+    expect(res.accountErrors).toEqual([]);
+    expect(res.sites[0].hasJiraAccess).toBe(false);
+  });
+
+  it('should record account error when accessible-resources returns 401/403', async () => {
+    const mockProvider = {
+      listAccounts: jest.fn().mockResolvedValue([
+        { id: 'acc-expired', displayName: 'expired@partner.com' }
+      ]),
+      asAccount: jest.fn().mockReturnValue({
+        fetch: jest.fn().mockResolvedValue({
+          ok: false,
+          status: 401,
+          json: () => Promise.resolve({ error: 'unauthorized' })
+        })
+      })
+    };
+
+    const res = await fetchSitesForAccounts(mockProvider as any);
+    expect(res.sites).toEqual([]);
+    expect(res.accountErrors).toHaveLength(1);
+    expect(res.accountErrors[0]).toMatchObject({
+      accountId: 'acc-expired',
+      status: 'AUTH_ERROR'
+    });
   });
 });

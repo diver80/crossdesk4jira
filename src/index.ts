@@ -2,17 +2,27 @@ import Resolver from '@forge/resolver';
 import type { WebTriggerRequest, WebTriggerResponse } from '@forge/api';
 import { fetchSitesForAccounts } from './resolvers/sites';
 import { aggregateIssuesFromSites } from './resolvers/issues';
-import { GadgetConfiguration } from './types';
+import { GadgetConfiguration, GadgetIssuesResponse } from './types';
 import { TokenAuthProvider } from './oauth/provider';
-import { completeAuthorization, renderCallbackPage, startAuthorization } from './oauth/flow';
-import { callbackUrl, clientCredentials, forgeHttp, forgeStore, oauthConfig } from './oauth/runtime';
+import { buildCallbackResponse, completeAuthorization, startAuthorization } from './oauth/flow';
+import { clientCredentials, forgeHttp, forgeStore, oauthConfig } from './oauth/runtime';
+import { isSafeAccountId } from './utils/validation';
+
+/** The parts of the Forge resolver context this app reads. */
+interface GadgetContext {
+  accountId?: string;
+  extension?: { gadgetConfiguration?: GadgetConfiguration };
+}
 
 const resolver = new Resolver();
 
-function requireUser(req: { context: { accountId?: string } }): string {
-  const userId = req.context.accountId;
+const contextOf = (req: { context: unknown }) => (req.context || {}) as GadgetContext;
+
+/** Connected accounts are stored per Jira user, so every call needs one. */
+function requireUser(req: { context: unknown }): string {
+  const userId = contextOf(req).accountId;
   if (!userId) {
-    throw new Error('No Jira user in context; connected accounts are stored per user.');
+    throw new Error('Please log in to Jira to use this gadget.');
   }
   return userId;
 }
@@ -29,9 +39,13 @@ resolver.define('getAllAccessibleSites', async req => {
   return fetchSitesForAccounts(providerFor(requireUser(req)));
 });
 
-resolver.define('getGadgetIssues', async req => {
-  const config = (req.context as any)?.extension?.gadgetConfiguration as GadgetConfiguration | undefined;
-  return aggregateIssuesFromSites(config, providerFor(requireUser(req)));
+resolver.define('getGadgetIssues', async (req): Promise<GadgetIssuesResponse> => {
+  const ctx = contextOf(req);
+  if (!ctx.accountId) {
+    // Anonymous viewer, e.g. on a public dashboard.
+    return { status: 'NO_USER', results: [] };
+  }
+  return aggregateIssuesFromSites(ctx.extension?.gadgetConfiguration, providerFor(ctx.accountId));
 });
 
 resolver.define('startOAuth', async req => {
@@ -39,32 +53,16 @@ resolver.define('startOAuth', async req => {
 });
 
 resolver.define('disconnectAccount', async req => {
-  const accountId = (req.payload as { accountId?: string })?.accountId;
-  if (!accountId) throw new Error('accountId is required');
+  const accountId = (req.payload as { accountId?: unknown })?.accountId;
+  if (!isSafeAccountId(accountId)) throw new Error('A valid accountId is required');
   await forgeStore().removeAccount(requireUser(req), accountId);
   return { ok: true };
 });
 
-resolver.define('getOAuthCallbackUrl', async () => ({ callbackUrl: await callbackUrl() }));
-
 export const handler = resolver.getDefinitions();
 
 /** Web trigger: OAuth redirect target. */
-export const oauthCallback = async (request: WebTriggerRequest): Promise<WebTriggerResponse> => {
-  let result;
-  try {
-    result = await completeAuthorization(forgeStore(), forgeHttp, await oauthConfig(), request, Date.now());
-  } catch (err) {
-    console.error('OAuth callback failed:', err);
-    result = {
-      ok: false,
-      title: 'Connection failed',
-      message: err instanceof Error ? err.message : 'Unexpected error while completing sign-in.'
-    };
-  }
-  return {
-    statusCode: result.ok ? 200 : 400,
-    headers: { 'Content-Type': ['text/html; charset=utf-8'] },
-    body: renderCallbackPage(result)
-  };
-};
+export const oauthCallback = async (request: WebTriggerRequest): Promise<WebTriggerResponse> =>
+  buildCallbackResponse(async () =>
+    completeAuthorization(forgeStore(), forgeHttp, await oauthConfig(), request, Date.now())
+  );

@@ -2,10 +2,13 @@ import { ConnectedAccount, KeyValueStore, PendingState, StoredToken } from './ty
 
 /** Pending authorizations expire after 10 minutes. */
 export const STATE_TTL_MS = 10 * 60 * 1000;
+/** Sign-in attempts a user can have open at once (e.g. own tab + private window). */
+export const MAX_PENDING_STATES = 3;
 
 const accountsKey = (userId: string) => `oauth-accounts:${userId}`;
 const tokenKey = (userId: string, accountId: string) => `oauth-token:${userId}:${accountId}`;
 const stateKey = (state: string) => `oauth-state:${state}`;
+const userStatesKey = (userId: string) => `oauth-user-states:${userId}`;
 
 export class OAuthStore {
   constructor(private readonly kv: KeyValueStore) {}
@@ -35,9 +38,20 @@ export class OAuthStore {
     await this.kv.setSecret(tokenKey(userId, accountId), token);
   }
 
+  /**
+   * Stores a pending authorization. Only the newest MAX_PENDING_STATES per
+   * user stay valid; older ones are deleted so abandoned attempts don't
+   * accumulate (storage has no TTL).
+   */
   async createState(state: string, userId: string, now: number): Promise<void> {
     const pending: PendingState = { userId, createdAt: now };
     await this.kv.setSecret(stateKey(state), pending);
+
+    const previous = await this.kv.getSecret(userStatesKey(userId));
+    const recent = [...(Array.isArray(previous) ? previous : []), state];
+    const stale = recent.slice(0, Math.max(0, recent.length - MAX_PENDING_STATES));
+    await Promise.all(stale.map(s => this.kv.deleteSecret(stateKey(s))));
+    await this.kv.setSecret(userStatesKey(userId), recent.slice(-MAX_PENDING_STATES));
   }
 
   /**

@@ -145,4 +145,128 @@ describe('aggregateIssuesFromSites', () => {
     expect(expired?.status).toBe('AUTH_ERROR');
     expect(expired?.issues).toEqual([]);
   });
+
+  it('should surface Jira 400 error message as JQL_ERROR', async () => {
+    const config: GadgetConfiguration = {
+      clusterTitle: 'JQL Error Test',
+      jql: 'invalidField = "test"',
+      selectedSites: [
+        {
+          accountId: 'acc-1',
+          accountEmail: 'dev@site.com',
+          siteId: 'site-1',
+          siteName: 'Bad JQL Site',
+          siteUrl: 'https://site1.atlassian.net'
+        }
+      ],
+      visibleColumns: ['status']
+    };
+
+    const mockProvider: any = {
+      asAccount: jest.fn().mockReturnValue({
+        fetch: jest.fn().mockResolvedValue({
+          ok: false,
+          status: 400,
+          json: () => Promise.resolve({
+            errorMessages: ["Field 'invalidField' does not exist or you do not have permission to view it."]
+          })
+        })
+      })
+    };
+
+    const res = await aggregateIssuesFromSites(config, mockProvider);
+    expect(res.status).toBe('OK');
+    expect(res.results[0].status).toBe('JQL_ERROR');
+    expect(res.results[0].errorMessage).toContain("Field 'invalidField' does not exist");
+  });
+
+  it('should map 429 to RATE_LIMITED status', async () => {
+    const config: GadgetConfiguration = {
+      clusterTitle: 'Rate limit test',
+      jql: 'resolution = Unresolved',
+      selectedSites: [
+        {
+          accountId: 'acc-1',
+          accountEmail: 'dev@site.com',
+          siteId: 'site-1',
+          siteName: 'Busy Site',
+          siteUrl: 'https://site1.atlassian.net'
+        }
+      ],
+      visibleColumns: ['status']
+    };
+
+    const mockProvider: any = {
+      asAccount: jest.fn().mockReturnValue({
+        fetch: jest.fn().mockResolvedValue({
+          ok: false,
+          status: 429,
+          json: () => Promise.resolve({})
+        })
+      })
+    };
+
+    const res = await aggregateIssuesFromSites(config, mockProvider);
+    expect(res.results[0].status).toBe('RATE_LIMITED');
+  });
+
+  it('should deduplicate same site selected multiple times', async () => {
+    const config: GadgetConfiguration = {
+      clusterTitle: 'Dedupe test',
+      jql: 'resolution = Unresolved',
+      selectedSites: [
+        {
+          accountId: 'acc-1',
+          siteId: 'site-1',
+          siteName: 'Site 1 Account A',
+          siteUrl: 'https://site1.atlassian.net'
+        },
+        {
+          accountId: 'acc-2',
+          siteId: 'site-1',
+          siteName: 'Site 1 Account B',
+          siteUrl: 'https://site1.atlassian.net'
+        }
+      ],
+      visibleColumns: []
+    };
+
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ issues: [] })
+    });
+
+    const mockProvider: any = {
+      asAccount: jest.fn().mockReturnValue({ fetch: fetchMock })
+    };
+
+    const res = await aggregateIssuesFromSites(config, mockProvider);
+    expect(res.results).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('should fail with INVALID_CONFIG when siteId or accountId has bad characters', async () => {
+    const config: GadgetConfiguration = {
+      clusterTitle: 'Validation test',
+      jql: 'resolution = Unresolved',
+      selectedSites: [
+        {
+          accountId: 'acc-1',
+          siteId: '../../../etc/passwd',
+          siteName: 'Evil Site',
+          siteUrl: 'https://evil.atlassian.net'
+        }
+      ],
+      visibleColumns: []
+    };
+
+    const mockProvider: any = {
+      asAccount: jest.fn()
+    };
+
+    const res = await aggregateIssuesFromSites(config, mockProvider);
+    expect(res.results[0].status).toBe('INVALID_CONFIG');
+    expect(mockProvider.asAccount).not.toHaveBeenCalled();
+  });
 });

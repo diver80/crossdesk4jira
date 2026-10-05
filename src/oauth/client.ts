@@ -1,4 +1,5 @@
 import { HttpFetch, OAuthClientConfig, StoredToken } from './types';
+import { isSafeAccountId } from '../utils/validation';
 
 export const AUTH_BASE = 'https://auth.atlassian.com';
 export const API_BASE = 'https://api.atlassian.com';
@@ -52,12 +53,15 @@ async function postToken(
   }
 
   const data = await res.json();
+  if (typeof data?.access_token !== 'string' || !data.access_token) {
+    throw new OAuthError('Token endpoint returned no access token', 'invalid_response', res.status);
+  }
   return {
     accessToken: data.access_token,
     // Atlassian rotates refresh tokens; keep the old one only if none was returned.
-    refreshToken: data.refresh_token || previousRefreshToken,
+    refreshToken: typeof data.refresh_token === 'string' && data.refresh_token ? data.refresh_token : previousRefreshToken,
     expiresAt: now + (Number(data.expires_in) || 3600) * 1000,
-    scope: data.scope
+    scope: typeof data.scope === 'string' ? data.scope : undefined
   };
 }
 
@@ -117,5 +121,9 @@ export async function fetchIdentity(http: HttpFetch, accessToken: string): Promi
     throw new OAuthError(`Could not read Atlassian profile (HTTP ${res.status})`, undefined, res.status);
   }
   const me = await res.json();
-  return { accountId: me.account_id, email: me.email || me.account_id, name: me.name };
+  if (!isSafeAccountId(me?.account_id)) {
+    throw new OAuthError('Atlassian profile has no valid account id', 'invalid_response', res.status);
+  }
+  const email = typeof me.email === 'string' && me.email ? me.email : me.account_id;
+  return { accountId: me.account_id, email, name: typeof me.name === 'string' ? me.name : undefined };
 }

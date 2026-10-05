@@ -6,9 +6,8 @@ app:
 modules:
   jira:dashboardGadget:
     - key: crossdesk4jira-gadget
-      title: Cross-Site Work Items
-      description: Aggregates Jira issues across multiple Atlassian Cloud sites and
-        accounts.
+      title: crossdesk4jira
+      description: Aggregates Jira issues across multiple Atlassian Cloud sites and accounts.
       thumbnail: https://developer.atlassian.com/platform/forge/images/icons/issue.svg
       resource: main-gadget
       edit:

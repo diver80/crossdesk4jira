@@ -29,9 +29,10 @@ export default function GadgetView() {
     try {
       const response = (await invoke('getGadgetIssues')) as GadgetIssuesResponse;
       setData(response);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to load issues:', err);
-      setErrorMessage(err.message || 'An error occurred while fetching cross-site issues.');
+      const msg = err instanceof Error ? err.message : 'An error occurred while fetching cross-site issues.';
+      setErrorMessage(msg);
     } finally {
       setLoading(false);
       setReloading(false);
@@ -47,9 +48,10 @@ export default function GadgetView() {
       setReauthorizing(true);
       await openAtlassianSignIn();
       setAwaitingSignIn(true);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Re-authentication failed:', err);
-      setErrorMessage(`Could not start sign-in: ${err?.message || 'unknown error'}`);
+      const msg = err instanceof Error ? err.message : 'unknown error';
+      setErrorMessage(`Could not start sign-in: ${msg}`);
     } finally {
       setReauthorizing(false);
     }
@@ -93,6 +95,19 @@ export default function GadgetView() {
     );
   }
 
+  if (data?.status === 'NO_USER') {
+    return (
+      <div style={{ padding: '24px', textAlign: 'center', backgroundColor: '#FAFBFC', border: '1px dashed #DFE1E6', borderRadius: '4px' }}>
+        <h3 style={{ fontSize: '16px', fontWeight: 600, color: '#172B4D', marginBottom: '8px' }}>
+          Please Log In
+        </h3>
+        <p style={{ fontSize: '13px', color: '#6B778C' }}>
+          Log in to Jira to view cross-site work items configured for your account.
+        </p>
+      </div>
+    );
+  }
+
   // State: Needs Configuration
   if (!data || data.status === 'NEEDS_CONFIG') {
     return (
@@ -115,7 +130,7 @@ export default function GadgetView() {
   const visibleColumns = new Set(data.visibleColumns || ['status', 'priority', 'dueDate', 'site', 'lastComment']);
 
   // Collect all issues across all sites and any site-level errors
-  const allIssues: Array<{ issue: NormalizedIssue; siteName: string; siteUrl: string }> = [];
+  const allIssues: Array<{ issue: NormalizedIssue; siteId: string; siteName: string; siteUrl: string }> = [];
   const siteErrors: SiteResult[] = [];
 
   for (const site of results) {
@@ -124,7 +139,7 @@ export default function GadgetView() {
     }
     if (Array.isArray(site.issues)) {
       for (const issue of site.issues) {
-        allIssues.push({ issue, siteName: site.siteName, siteUrl: site.siteUrl });
+        allIssues.push({ issue, siteId: site.siteId, siteName: site.siteName, siteUrl: site.siteUrl });
       }
     }
   }
@@ -139,7 +154,7 @@ export default function GadgetView() {
   // Build Dynamic Table Headings
   const headCells: any[] = [
     { key: 'key', content: 'Key', width: 12 },
-    { key: 'summary', content: 'Summary', isSortable: true }
+    { key: 'summary', content: 'Summary' }
   ];
 
   if (visibleColumns.has('status')) {
@@ -159,11 +174,12 @@ export default function GadgetView() {
   }
 
   // Build Dynamic Table Rows
-  const rows = allIssues.map(({ issue, siteName }) => {
+  const rows = allIssues.map(({ issue, siteId, siteName }) => {
+    const isHttpsUrl = issue.browseUrl && /^https:\/\//i.test(issue.browseUrl);
     const cells: any[] = [
       {
         key: 'key',
-        content: (
+        content: isHttpsUrl ? (
           <a
             href={issue.browseUrl}
             target="_blank"
@@ -172,6 +188,8 @@ export default function GadgetView() {
           >
             {issue.key}
           </a>
+        ) : (
+          <span style={{ fontWeight: 600, color: '#172B4D' }}>{issue.key}</span>
         )
       },
       {
@@ -282,7 +300,7 @@ export default function GadgetView() {
     }
 
     return {
-      key: `${issue.id || issue.key}`,
+      key: `${siteId}:${issue.id || issue.key}`,
       cells
     };
   });
@@ -349,11 +367,15 @@ export default function GadgetView() {
         <div style={{ marginBottom: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
           {siteErrors.map(errSite => (
             <SectionMessage
-              key={errSite.siteId}
-              appearance="warning"
-              title={`Warning: Unable to query ${errSite.siteName}`}
+              key={`${errSite.siteId}:${errSite.status}`}
+              appearance={errSite.status === 'NOT_CONNECTED' ? 'information' : 'warning'}
+              title={
+                errSite.status === 'NOT_CONNECTED'
+                  ? `Notice: ${errSite.siteName} is not connected for your account`
+                  : `Warning: Unable to query ${errSite.siteName}`
+              }
             >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
                 <p style={{ margin: 0, fontSize: '12px' }}>
                   {errSite.errorMessage || 'Failed to fetch issues from this instance.'}
                 </p>

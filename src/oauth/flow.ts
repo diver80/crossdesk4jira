@@ -2,6 +2,7 @@ import { randomBytes } from 'crypto';
 import { buildAuthorizeUrl, exchangeCode, fetchIdentity } from './client';
 import { OAuthStore } from './store';
 import { HttpFetch, OAuthClientConfig } from './types';
+import { isWellFormedState } from '../utils/validation';
 
 export function newState(): string {
   return randomBytes(32).toString('hex');
@@ -50,7 +51,7 @@ export async function completeAuthorization(
     return { ok: false, title: 'Invalid request', message: 'The sign-in response is missing its state parameter.' };
   }
 
-  const pending = await store.consumeState(state, now);
+  const pending = isWellFormedState(state) ? await store.consumeState(state, now) : undefined;
   if (!pending) {
     return {
       ok: false,
@@ -91,6 +92,44 @@ export function renderCallbackPage(result: CallbackResult): string {
 <body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:520px;margin:80px auto;padding:0 16px;color:#172B4D">
 <h1 style="font-size:20px;color:${color}">${escapeHtml(result.title)}</h1>
 <p>${escapeHtml(result.message)}</p>
-<p style="color:#626F86;font-size:13px">Cross-Site Work Items</p>
+<p style="color:#626F86;font-size:13px">crossdesk4jira</p>
 </body></html>`;
+}
+
+export interface CallbackHttpResponse {
+  statusCode: number;
+  headers: Record<string, string[]>;
+  body: string;
+}
+
+const CALLBACK_HEADERS: Record<string, string[]> = {
+  'Content-Type': ['text/html; charset=utf-8'],
+  'Cache-Control': ['no-store'],
+  'Referrer-Policy': ['no-referrer'],
+  'X-Content-Type-Options': ['nosniff'],
+  'X-Frame-Options': ['DENY'],
+  'Content-Security-Policy': ["default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'"]
+};
+
+/**
+ * Runs the callback and renders the result. The web trigger is public, so
+ * unexpected errors are logged but shown only as a generic message.
+ */
+export async function buildCallbackResponse(run: () => Promise<CallbackResult>): Promise<CallbackHttpResponse> {
+  let result: CallbackResult;
+  try {
+    result = await run();
+  } catch (err) {
+    console.error('OAuth callback failed:', err);
+    result = {
+      ok: false,
+      title: 'Connection failed',
+      message: 'Something went wrong while completing sign-in. Close this tab and try again from the gadget.'
+    };
+  }
+  return {
+    statusCode: result.ok ? 200 : 400,
+    headers: CALLBACK_HEADERS,
+    body: renderCallbackPage(result)
+  };
 }

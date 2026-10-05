@@ -1,5 +1,5 @@
-import { OAuthStore, STATE_TTL_MS } from '../src/oauth/store';
-import { completeAuthorization, renderCallbackPage, startAuthorization } from '../src/oauth/flow';
+import { MAX_PENDING_STATES, OAuthStore, STATE_TTL_MS } from '../src/oauth/store';
+import { buildCallbackResponse, completeAuthorization, renderCallbackPage, startAuthorization } from '../src/oauth/flow';
 import { TokenAuthProvider } from '../src/oauth/provider';
 import { HttpFetch, HttpResponse, KeyValueStore, OAuthClientConfig } from '../src/oauth/types';
 import { aggregateIssuesFromSites } from '../src/resolvers/issues';
@@ -31,6 +31,11 @@ const CONFIG: OAuthClientConfig = {
 
 const NOW = 1_800_000_000_000;
 
+/** Well-formed states (64 hex chars), like newState() produces. */
+const state = (n: number) => n.toString(16).padStart(64, '0');
+const S1 = state(1);
+const S2 = state(2);
+
 describe('OAuth authorization flow', () => {
   let kv: MemoryKV;
   let store: OAuthStore;
@@ -41,22 +46,22 @@ describe('OAuth authorization flow', () => {
   });
 
   it('builds the Atlassian authorize URL and stores a pending state as a secret', async () => {
-    const { authorizeUrl } = await startAuthorization(store, CONFIG, 'jira-user-1', NOW, 'state-abc');
+    const { authorizeUrl } = await startAuthorization(store, CONFIG, 'jira-user-1', NOW, S1);
     const url = new URL(authorizeUrl);
 
     expect(url.origin + url.pathname).toBe('https://auth.atlassian.com/authorize');
     expect(url.searchParams.get('client_id')).toBe('client-123');
     expect(url.searchParams.get('redirect_uri')).toBe(CONFIG.redirectUri);
-    expect(url.searchParams.get('state')).toBe('state-abc');
+    expect(url.searchParams.get('state')).toBe(S1);
     expect(url.searchParams.get('scope')).toBe('read:jira-work read:me offline_access');
     expect(url.searchParams.get('audience')).toBe('api.atlassian.com');
     expect(url.searchParams.get('response_type')).toBe('code');
-    expect(kv.secret.get('oauth-state:state-abc')).toEqual({ userId: 'jira-user-1', createdAt: NOW });
+    expect(kv.secret.get(`oauth-state:${S1}`)).toEqual({ userId: 'jira-user-1', createdAt: NOW });
     expect(kv.plain.size).toBe(0);
   });
 
   it('exchanges the code, stores tokens for the initiating user and consumes the state', async () => {
-    await startAuthorization(store, CONFIG, 'jira-user-1', NOW, 'state-abc');
+    await startAuthorization(store, CONFIG, 'jira-user-1', NOW, S1);
     const http = jest.fn<ReturnType<HttpFetch>, Parameters<HttpFetch>>(async (url, init) => {
       if (url === 'https://auth.atlassian.com/oauth/token') {
         expect(JSON.parse(init!.body!)).toEqual({
@@ -76,7 +81,7 @@ describe('OAuth authorization flow', () => {
     });
 
     const result = await completeAuthorization(
-      store, http, CONFIG, { queryParameters: { state: ['state-abc'], code: ['code-1'] } }, NOW + 1000
+      store, http, CONFIG, { queryParameters: { state: [S1], code: ['code-1'] } }, NOW + 1000
     );
 
     expect(result.ok).toBe(true);
@@ -92,7 +97,7 @@ describe('OAuth authorization flow', () => {
 
     // Replay of the same state is rejected.
     const replay = await completeAuthorization(
-      store, http, CONFIG, { queryParameters: { state: ['state-abc'], code: ['code-1'] } }, NOW + 2000
+      store, http, CONFIG, { queryParameters: { state: [S1], code: ['code-1'] } }, NOW + 2000
     );
     expect(replay.ok).toBe(false);
     expect(http).toHaveBeenCalledTimes(2);
@@ -101,31 +106,63 @@ describe('OAuth authorization flow', () => {
   it('rejects unknown and expired states without calling Atlassian', async () => {
     const http = jest.fn();
     const unknown = await completeAuthorization(
-      store, http, CONFIG, { queryParameters: { state: ['nope'], code: ['c'] } }, NOW
+      store, http, CONFIG, { queryParameters: { state: [S2], code: ['c'] } }, NOW
     );
     expect(unknown.ok).toBe(false);
 
-    await startAuthorization(store, CONFIG, 'jira-user-1', NOW, 'old-state');
+    await startAuthorization(store, CONFIG, 'jira-user-1', NOW, S1);
     const expired = await completeAuthorization(
-      store, http, CONFIG, { queryParameters: { state: ['old-state'], code: ['c'] } }, NOW + STATE_TTL_MS + 1
+      store, http, CONFIG, { queryParameters: { state: [S1], code: ['c'] } }, NOW + STATE_TTL_MS + 1
     );
     expect(expired.ok).toBe(false);
     expect(expired.title).toMatch(/expired/i);
-    expect(kv.secret.has('oauth-state:old-state')).toBe(false);
+    expect(kv.secret.has(`oauth-state:${S1}`)).toBe(false);
+    expect(http).not.toHaveBeenCalled();
+  });
+
+  it('rejects malformed or oversized states without touching storage', async () => {
+    const getSecret = jest.spyOn(kv, 'getSecret');
+    const http = jest.fn();
+    for (const bad of ['nope', '../x', 'a'.repeat(1000), `${S1}?x`]) {
+      const res = await completeAuthorization(store, http, CONFIG, { queryParameters: { state: [bad], code: ['c'] } }, NOW);
+      expect(res.ok).toBe(false);
+    }
+    expect(getSecret).not.toHaveBeenCalled();
     expect(http).not.toHaveBeenCalled();
   });
 
   it('reports a denied consent and still consumes the state', async () => {
-    await startAuthorization(store, CONFIG, 'jira-user-1', NOW, 's1');
+    await startAuthorization(store, CONFIG, 'jira-user-1', NOW, S1);
     const http = jest.fn();
     const res = await completeAuthorization(
       store, http, CONFIG,
-      { queryParameters: { state: ['s1'], error: ['access_denied'], error_description: ['User denied'] } },
+      { queryParameters: { state: [S1], error: ['access_denied'], error_description: ['User denied'] } },
       NOW
     );
     expect(res).toMatchObject({ ok: false, message: 'User denied' });
-    expect(kv.secret.has('oauth-state:s1')).toBe(false);
+    expect(kv.secret.has(`oauth-state:${S1}`)).toBe(false);
     expect(http).not.toHaveBeenCalled();
+  });
+
+  it(`keeps only the newest ${MAX_PENDING_STATES} pending states per user`, async () => {
+    for (let i = 1; i <= MAX_PENDING_STATES + 2; i++) {
+      await startAuthorization(store, CONFIG, 'jira-user-1', NOW, state(i));
+    }
+    await startAuthorization(store, CONFIG, 'jira-user-2', NOW, state(99));
+
+    const live = [...kv.secret.keys()].filter(k => k.startsWith('oauth-state:'));
+    expect(live.sort()).toEqual(
+      [3, 4, 5, 99].map(i => `oauth-state:${state(i)}`).sort()
+    );
+  });
+
+  it('does not store anything when the token response has no access token', async () => {
+    await startAuthorization(store, CONFIG, 'jira-user-1', NOW, S1);
+    const http = jest.fn<ReturnType<HttpFetch>, Parameters<HttpFetch>>(async () => json(200, { token_type: 'Bearer' }));
+    await expect(
+      completeAuthorization(store, http, CONFIG, { queryParameters: { state: [S1], code: ['c'] } }, NOW)
+    ).rejects.toThrow(/no access token/);
+    expect(await store.listAccounts('jira-user-1')).toEqual([]);
   });
 
   it('escapes HTML in the callback page', () => {
@@ -133,6 +170,28 @@ describe('OAuth authorization flow', () => {
     expect(html).not.toContain('<script>x</script>');
     expect(html).toContain('&lt;script&gt;');
     expect(html).toContain('&quot;a&quot; &amp; b');
+  });
+});
+
+describe('buildCallbackResponse', () => {
+  it('renders results with hardening headers', async () => {
+    const res = await buildCallbackResponse(async () => ({ ok: true, title: 'Account connected', message: 'ok' }));
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['Cache-Control']).toEqual(['no-store']);
+    expect(res.headers['Referrer-Policy']).toEqual(['no-referrer']);
+    expect(res.headers['Content-Security-Policy'][0]).toContain("frame-ancestors 'none'");
+    expect(res.body).toContain('Account connected');
+  });
+
+  it('shows a generic message for unexpected errors, never the error text', async () => {
+    const spy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    const res = await buildCallbackResponse(async () => {
+      throw new Error('OAuth is not configured: set ATLASSIAN_CLIENT_SECRET');
+    });
+    spy.mockRestore();
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toContain('Connection failed');
+    expect(res.body).not.toContain('ATLASSIAN_CLIENT_SECRET');
   });
 });
 
@@ -149,6 +208,9 @@ describe('TokenAuthProvider', () => {
       { id: 'atl-1', email: 'me@a.com', connectedAt: NOW },
       { accessToken: 'at-old', refreshToken, expiresAt }
     );
+
+  const site = { accountId: 'atl-1', siteId: 's1', siteName: 'S1', siteUrl: 'https://s1.atlassian.net' };
+  const configFor = (sites = [site]) => ({ clusterTitle: 'C', jql: 'order by updated', visibleColumns: [], selectedSites: sites });
 
   it('lists only the current user\'s accounts and calls api.atlassian.com with a bearer token', async () => {
     await seed(NOW + 3600_000);
@@ -186,7 +248,43 @@ describe('TokenAuthProvider', () => {
     expect(await store.getToken('jira-user-1', 'atl-1')).toMatchObject({ accessToken: 'at-new', refreshToken: 'rt-new' });
   });
 
-  it('returns 401 when the refresh token was revoked, which surfaces as AUTH_ERROR per site', async () => {
+  it('uses the token another invocation just refreshed instead of failing (rotation race)', async () => {
+    await seed(NOW - 1);
+    // Two invocations (e.g. two gadgets) share storage. The first refresh wins;
+    // the second is rejected because the refresh token was already rotated.
+    let refreshes = 0;
+    let notifyFirstDone!: () => void;
+    const firstDone = new Promise<void>(r => { notifyFirstDone = r; });
+    const http = jest.fn<ReturnType<HttpFetch>, Parameters<HttpFetch>>(async url => {
+      if (url === 'https://auth.atlassian.com/oauth/token') {
+        refreshes++;
+        if (refreshes === 1) {
+          const res = json(200, { access_token: 'at-new', refresh_token: 'rt-new', expires_in: 3600 });
+          notifyFirstDone();
+          return res;
+        }
+        await firstDone;
+        return json(403, { error: 'invalid_grant', error_description: 'Unknown or invalid refresh token.' });
+      }
+      return json(200, { issues: [] });
+    });
+    const a = new TokenAuthProvider('jira-user-1', store, http, CONFIG, () => NOW);
+    const b = new TokenAuthProvider('jira-user-1', store, http, CONFIG, () => NOW);
+
+    const [resA, resB] = await Promise.all([
+      aggregateIssuesFromSites(configFor(), a),
+      aggregateIssuesFromSites(configFor(), b)
+    ]);
+
+    expect(resA.results[0].status).toBe('OK');
+    expect(resB.results[0].status).toBe('OK');
+    const bearer = http.mock.calls
+      .filter(([u]) => u.startsWith('https://api.atlassian.com'))
+      .map(([, init]) => init!.headers!.Authorization);
+    expect(bearer).toEqual(['Bearer at-new', 'Bearer at-new']);
+  });
+
+  it('returns AUTH_ERROR when the refresh token was revoked', async () => {
     await seed(NOW - 1);
     const http = jest.fn<ReturnType<HttpFetch>, Parameters<HttpFetch>>(async url =>
       url.startsWith('https://auth.atlassian.com')
@@ -195,23 +293,21 @@ describe('TokenAuthProvider', () => {
     );
     const provider = new TokenAuthProvider('jira-user-1', store, http, CONFIG, () => NOW);
 
-    const res = await aggregateIssuesFromSites(
-      {
-        clusterTitle: 'C',
-        jql: 'order by updated',
-        visibleColumns: [],
-        selectedSites: [{ accountId: 'atl-1', accountEmail: 'me@a.com', siteId: 's1', siteName: 'S1', siteUrl: 'https://s1.atlassian.net' }]
-      },
-      provider
-    );
+    const res = await aggregateIssuesFromSites(configFor(), provider);
 
     expect(res.results[0].status).toBe('AUTH_ERROR');
     expect(http.mock.calls.some(([u]) => u.startsWith('https://api.atlassian.com'))).toBe(false);
   });
 
-  it('returns 401 for an account without stored tokens', async () => {
-    const provider = new TokenAuthProvider('jira-user-1', store, jest.fn(), CONFIG, () => NOW);
-    const res = await provider.asAccount('missing').fetch('/me');
-    expect(res.status).toBe(401);
+  it('returns NOT_CONNECTED when the viewer has no connection for the configured account', async () => {
+    await seed(NOW + 3600_000);
+    const http = jest.fn();
+    // Another Jira user views a dashboard configured with jira-user-1's account.
+    const viewer = new TokenAuthProvider('jira-user-2', store, http, CONFIG, () => NOW);
+
+    const res = await aggregateIssuesFromSites(configFor(), viewer);
+
+    expect(res.results[0].status).toBe('NOT_CONNECTED');
+    expect(http).not.toHaveBeenCalled();
   });
 });

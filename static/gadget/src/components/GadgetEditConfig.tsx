@@ -6,7 +6,7 @@ import { Checkbox } from '@atlaskit/checkbox';
 import Spinner from '@atlaskit/spinner';
 import SectionMessage from '@atlaskit/section-message';
 import Badge from '@atlaskit/badge';
-import { AccessibleSite, GadgetConfiguration, SelectedSite } from '../types';
+import { AccessibleSite, AccountDiscoveryError, GadgetConfiguration, SelectedSite, SiteDiscoveryResult } from '../types';
 import { ConnectedAccount, CONNECTED_APPS_URL, openAtlassianSignIn } from '../oauth';
 
 const DEFAULT_JQL = 'assignee = currentUser() AND resolution = Unresolved ORDER BY updated DESC';
@@ -31,6 +31,7 @@ export default function GadgetEditConfig() {
   const [copied, setCopied] = useState(false);
   const [refreshingAccounts, setRefreshingAccounts] = useState(false);
   const [connectedAccounts, setConnectedAccounts] = useState<ConnectedAccount[]>([]);
+  const [accountErrors, setAccountErrors] = useState<AccountDiscoveryError[]>([]);
 
   // Form State
   const [clusterTitle, setClusterTitle] = useState('Cross-Site Work Items');
@@ -44,6 +45,9 @@ export default function GadgetEditConfig() {
     'lastComment'
   ]);
   const [selectedSiteKeys, setSelectedSiteKeys] = useState<Set<string>>(new Set());
+
+  // Previously saved sites (to preserve sites not discoverable under current user's tokens)
+  const [savedSitesMap, setSavedSitesMap] = useState<Map<string, SelectedSite>>(new Map());
 
   // Discovered Sites
   const [accessibleSites, setAccessibleSites] = useState<AccessibleSite[]>([]);
@@ -75,15 +79,22 @@ export default function GadgetEditConfig() {
         if (typeof savedConfig.maxItems === 'number') setMaxItems(String(savedConfig.maxItems));
         if (Array.isArray(savedConfig.visibleColumns)) setVisibleColumns(savedConfig.visibleColumns);
         if (Array.isArray(savedConfig.selectedSites)) {
-          const keys = new Set(savedConfig.selectedSites.map(s => makeSiteKey(s.accountId, s.siteId)));
-          setSelectedSiteKeys(keys);
+          const map = new Map<string, SelectedSite>();
+          for (const s of savedConfig.selectedSites) {
+            if (s && s.accountId && s.siteId) {
+              map.set(makeSiteKey(s.accountId, s.siteId), s);
+            }
+          }
+          setSavedSitesMap(map);
+          setSelectedSiteKeys(new Set(map.keys()));
         }
       }
 
       // 2. Discover sites
       await fetchSites();
-    } catch (err: any) {
-      setErrorMessage(err.message || 'Failed to initialize gadget configuration.');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to initialize gadget configuration.';
+      setErrorMessage(msg);
     } finally {
       setLoading(false);
     }
@@ -91,16 +102,19 @@ export default function GadgetEditConfig() {
 
   const fetchSites = async () => {
     try {
-      const [accounts, sites] = await Promise.all([
+      const [accounts, discovery] = await Promise.all([
         invoke('getConnectedAccounts') as Promise<ConnectedAccount[]>,
-        invoke('getAllAccessibleSites') as Promise<AccessibleSite[]>
+        invoke('getAllAccessibleSites') as Promise<SiteDiscoveryResult>
       ]);
       setConnectedAccounts(accounts || []);
-      setAccessibleSites(sites || []);
-    } catch (err: any) {
+      setAccessibleSites(discovery?.sites || []);
+      setAccountErrors(discovery?.accountErrors || []);
+    } catch (err: unknown) {
       console.error('Failed to discover sites:', err);
-      setErrorMessage(err?.message || 'Failed to load connected accounts.');
+      const msg = err instanceof Error ? err.message : 'Failed to load connected accounts.';
+      setErrorMessage(msg);
       setAccessibleSites([]);
+      setAccountErrors([]);
     }
   };
 
@@ -115,10 +129,10 @@ export default function GadgetEditConfig() {
       setSignInUrl(await openAtlassianSignIn());
       setCopied(false);
       setAwaitingSignIn(true);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to link Atlassian account:', err);
-      const detail = err?.message || (typeof err === 'string' ? err : 'Please try again.');
-      setErrorMessage(`Failed to connect Atlassian account: ${detail}`);
+      const msg = err instanceof Error ? err.message : 'Please try again.';
+      setErrorMessage(`Failed to connect Atlassian account: ${msg}`);
     } finally {
       setConnectingAccount(false);
     }
@@ -144,18 +158,24 @@ export default function GadgetEditConfig() {
   };
 
   const handleDisconnect = async (accountId: string) => {
+    const confirmed = window.confirm(
+      'Disconnect this Atlassian account from your Jira user? Target sites using this account will stop showing issues in your gadgets.'
+    );
+    if (!confirmed) return;
+
     try {
       setErrorMessage(null);
       await invoke('disconnectAccount', { accountId });
       setSelectedSiteKeys(prev => new Set([...prev].filter(k => !k.startsWith(`${accountId}::`))));
       await fetchSites();
-    } catch (err: any) {
-      setErrorMessage(`Failed to disconnect account: ${err?.message || 'unknown error'}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'unknown error';
+      setErrorMessage(`Failed to disconnect account: ${msg}`);
     }
   };
 
-  const toggleSite = (site: AccessibleSite) => {
-    const key = makeSiteKey(site.accountId, site.siteId);
+  const toggleSite = (accountId: string, siteId: string) => {
+    const key = makeSiteKey(accountId, siteId);
     setSelectedSiteKeys(prev => {
       const next = new Set(prev);
       if (next.has(key)) {
@@ -188,17 +208,38 @@ export default function GadgetEditConfig() {
 
     try {
       const selectedSites: SelectedSite[] = [];
+      const accessibleMap = new Map<string, AccessibleSite>();
       for (const site of accessibleSites) {
-        const key = makeSiteKey(site.accountId, site.siteId);
-        if (selectedSiteKeys.has(key)) {
+        accessibleMap.set(makeSiteKey(site.accountId, site.siteId), site);
+      }
+
+      for (const key of selectedSiteKeys) {
+        const accessible = accessibleMap.get(key);
+        if (accessible) {
           selectedSites.push({
-            accountId: site.accountId,
-            accountEmail: site.accountEmail,
-            siteId: site.siteId,
-            siteName: site.siteName,
-            siteUrl: site.siteUrl
+            accountId: accessible.accountId,
+            siteId: accessible.siteId,
+            siteName: accessible.siteName,
+            siteUrl: accessible.siteUrl
           });
+        } else {
+          // Preserve saved sites not currently discoverable under this viewer
+          const saved = savedSitesMap.get(key);
+          if (saved) {
+            selectedSites.push({
+              accountId: saved.accountId,
+              siteId: saved.siteId,
+              siteName: saved.siteName,
+              siteUrl: saved.siteUrl
+            });
+          }
         }
+      }
+
+      if (selectedSites.length === 0) {
+        setErrorMessage('Please select at least one site to monitor.');
+        setSaving(false);
+        return;
       }
 
       const config: GadgetConfiguration = {
@@ -206,14 +247,14 @@ export default function GadgetEditConfig() {
         jql: jql.trim() || DEFAULT_JQL,
         selectedSites,
         visibleColumns,
-        refreshIntervalMinutes: 15,
         maxItems: parsedMaxItems ?? DEFAULT_MAX_ITEMS
       };
 
       await view.submit(config);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to save configuration:', err);
-      setErrorMessage(err.message || 'Failed to save gadget configuration.');
+      const msg = err instanceof Error ? err.message : 'Failed to save gadget configuration.';
+      setErrorMessage(msg);
       setSaving(false);
     }
   };
@@ -235,8 +276,7 @@ export default function GadgetEditConfig() {
     );
   }
 
-  // Group sites under every connected account, including accounts whose
-  // token no longer works (they have no sites but must stay visible).
+  // Group discovered sites under each connected account
   const accountsMap = new Map<string, { email: string; sites: AccessibleSite[] }>();
   for (const acc of connectedAccounts) {
     accountsMap.set(acc.id, { email: acc.email, sites: [] });
@@ -248,6 +288,14 @@ export default function GadgetEditConfig() {
     accountsMap.get(site.accountId)!.sites.push(site);
   }
   const accounts = Array.from(accountsMap.entries());
+
+  // Find saved sites that were not discovered under the current user's accounts
+  const undiscoveredSavedSites: SelectedSite[] = [];
+  for (const [key, site] of savedSitesMap.entries()) {
+    if (selectedSiteKeys.has(key) && !accessibleSites.some(s => makeSiteKey(s.accountId, s.siteId) === key)) {
+      undiscoveredSavedSites.push(site);
+    }
+  }
 
   return (
     <div style={{ padding: '16px', maxWidth: '720px', margin: '0 auto', fontFamily: 'sans-serif' }}>
@@ -408,56 +456,107 @@ export default function GadgetEditConfig() {
           </SectionMessage>
         ) : (
           <div style={{ border: '1px solid #DFE1E6', borderRadius: '4px', padding: '12px', background: '#FAFBFC' }}>
-            {accounts.map(([accId, acc]) => (
-              <div key={accId} style={{ marginBottom: '16px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                  <span style={{ fontWeight: 600, fontSize: '13px', color: '#091E42' }}>👤 {acc.email}</span>
-                  <Button appearance="subtle" spacing="compact" onClick={() => handleDisconnect(accId)}>
-                    Disconnect
-                  </Button>
-                </div>
-                <div style={{ paddingLeft: '16px' }}>
-                  {acc.sites.length === 0 ? (
-                    <p style={{ fontSize: '12px', color: '#6B778C', fontStyle: 'italic' }}>
-                      No accessible Jira sites found. If this account used to work, its access may have
-                      expired or been revoked. Disconnect it and connect again.
-                    </p>
-                  ) : (
-                    acc.sites.map(site => {
-                      const key = makeSiteKey(site.accountId, site.siteId);
-                      const isSelected = selectedSiteKeys.has(key);
-                      return (
-                        <div
-                          key={key}
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            marginBottom: '6px'
-                          }}
-                        >
-                          <Checkbox
-                            isChecked={isSelected}
-                            isDisabled={!site.hasJiraAccess}
-                            onChange={() => toggleSite(site)}
-                            label={
-                              <span>
-                                <strong>{site.siteName}</strong>{' '}
-                                <span style={{ color: '#6B778C', fontSize: '12px' }}>({site.siteUrl})</span>
-                              </span>
-                            }
-                            value={key}
-                          />
-                          {!site.hasJiraAccess && (
-                            <Badge appearance="removed">No Jira Access</Badge>
-                          )}
-                        </div>
-                      );
-                    })
+            {accounts.map(([accId, acc]) => {
+              const accErr = accountErrors.find(e => e.accountId === accId);
+              return (
+                <div key={accId} style={{ marginBottom: '16px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                    <span style={{ fontWeight: 600, fontSize: '13px', color: '#091E42' }}>👤 {acc.email}</span>
+                    <Button appearance="subtle" spacing="compact" onClick={() => handleDisconnect(accId)}>
+                      Disconnect
+                    </Button>
+                  </div>
+
+                  {accErr && (
+                    <div style={{ marginBottom: '8px', padding: '8px', backgroundColor: '#FFEBE6', borderRadius: '3px' }}>
+                      <p style={{ margin: 0, fontSize: '12px', color: '#BF2600' }}>
+                        ⚠️ {accErr.message}
+                      </p>
+                    </div>
                   )}
+
+                  <div style={{ paddingLeft: '16px' }}>
+                    {acc.sites.length === 0 && !accErr ? (
+                      <p style={{ fontSize: '12px', color: '#6B778C', fontStyle: 'italic' }}>
+                        No accessible Jira sites found for this account.
+                      </p>
+                    ) : (
+                      acc.sites.map(site => {
+                        const key = makeSiteKey(site.accountId, site.siteId);
+                        const isSelected = selectedSiteKeys.has(key);
+                        return (
+                          <div
+                            key={key}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              marginBottom: '6px'
+                            }}
+                          >
+                            <Checkbox
+                              isChecked={isSelected}
+                              isDisabled={!site.hasJiraAccess}
+                              onChange={() => toggleSite(site.accountId, site.siteId)}
+                              label={
+                                <span>
+                                  <strong>{site.siteName}</strong>{' '}
+                                  <span style={{ color: '#6B778C', fontSize: '12px' }}>({site.siteUrl})</span>
+                                </span>
+                              }
+                              value={key}
+                            />
+                            {!site.hasJiraAccess && (
+                              <Badge appearance="removed">No Jira Access</Badge>
+                            )}
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
                 </div>
+              );
+            })}
+
+            {/* Preserved Sites Section */}
+            {undiscoveredSavedSites.length > 0 && (
+              <div style={{ marginTop: '16px', paddingTop: '12px', borderTop: '1px dashed #DFE1E6' }}>
+                <p style={{ fontSize: '12px', fontWeight: 600, color: '#6B778C', marginBottom: '4px' }}>
+                  Previously Selected Sites (Account Not Currently Connected)
+                </p>
+                <p style={{ fontSize: '11px', color: '#8993A4', marginBottom: '8px' }}>
+                  These sites were configured previously. They will stay configured unless you uncheck them.
+                </p>
+                {undiscoveredSavedSites.map(site => {
+                  const key = makeSiteKey(site.accountId, site.siteId);
+                  const isSelected = selectedSiteKeys.has(key);
+                  return (
+                    <div
+                      key={key}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        marginBottom: '6px'
+                      }}
+                    >
+                      <Checkbox
+                        isChecked={isSelected}
+                        onChange={() => toggleSite(site.accountId, site.siteId)}
+                        label={
+                          <span>
+                            <strong>{site.siteName}</strong>{' '}
+                            <span style={{ color: '#6B778C', fontSize: '12px' }}>({site.siteUrl})</span>
+                          </span>
+                        }
+                        value={key}
+                      />
+                      <Badge appearance="important">Not Connected</Badge>
+                    </div>
+                  );
+                })}
               </div>
-            ))}
+            )}
           </div>
         )}
       </div>
