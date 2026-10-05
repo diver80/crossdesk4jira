@@ -1,0 +1,86 @@
+import { fetchSitesForAccounts } from '../src/resolvers/sites';
+
+describe('fetchSitesForAccounts', () => {
+  it('should return empty list when no accounts are connected', async () => {
+    const mockProvider = {
+      listAccounts: jest.fn().mockResolvedValue([]),
+      asAccount: jest.fn()
+    };
+
+    const sites = await fetchSitesForAccounts(mockProvider as any);
+    expect(sites).toEqual([]);
+    expect(mockProvider.listAccounts).toHaveBeenCalledTimes(1);
+  });
+
+  it('should discover accessible resources and test Jira access for each site', async () => {
+    const mockProvider = {
+      listAccounts: jest.fn().mockResolvedValue([
+        { id: 'acc-1', displayName: 'dev@company.com' }
+      ]),
+      asAccount: jest.fn().mockReturnValue({
+        fetch: jest.fn().mockImplementation((path: string) => {
+          if (path === '/oauth/token/accessible-resources') {
+            return Promise.resolve({
+              ok: true,
+              status: 200,
+              json: () => Promise.resolve([
+                {
+                  id: 'site-1',
+                  name: 'Company Production',
+                  url: 'https://company.atlassian.net',
+                  avatarUrl: 'https://avatar.url/1.png'
+                }
+              ])
+            });
+          }
+          if (path.includes('/rest/api/3/myself')) {
+            return Promise.resolve({
+              ok: true,
+              status: 200,
+              json: () => Promise.resolve({ accountId: 'acc-1', active: true })
+            });
+          }
+          return Promise.resolve({ ok: false, status: 404 });
+        })
+      })
+    };
+
+    const sites = await fetchSitesForAccounts(mockProvider as any);
+    expect(sites).toHaveLength(1);
+    expect(sites[0]).toEqual({
+      accountId: 'acc-1',
+      accountEmail: 'dev@company.com',
+      siteId: 'site-1',
+      siteName: 'Company Production',
+      siteUrl: 'https://company.atlassian.net',
+      avatarUrl: 'https://avatar.url/1.png',
+      hasJiraAccess: true
+    });
+  });
+
+  it('should mark hasJiraAccess as false if myself probe fails', async () => {
+    const mockProvider = {
+      listAccounts: jest.fn().mockResolvedValue([
+        { id: 'acc-2', displayName: 'external@partner.com' }
+      ]),
+      asAccount: jest.fn().mockReturnValue({
+        fetch: jest.fn().mockImplementation((path: string) => {
+          if (path === '/oauth/token/accessible-resources') {
+            return Promise.resolve({
+              ok: true,
+              status: 200,
+              json: () => Promise.resolve([
+                { id: 'site-2', name: 'Partner Site', url: 'https://partner.atlassian.net' }
+              ])
+            });
+          }
+          return Promise.resolve({ ok: false, status: 403 });
+        })
+      })
+    };
+
+    const sites = await fetchSitesForAccounts(mockProvider as any);
+    expect(sites).toHaveLength(1);
+    expect(sites[0].hasJiraAccess).toBe(false);
+  });
+});
