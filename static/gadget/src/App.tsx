@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { view } from '@forge/bridge';
 import Spinner from '@atlaskit/spinner';
 import GadgetView from './components/GadgetView';
@@ -15,7 +15,6 @@ export default function App() {
       setLoading(false);
     }).catch(err => {
       console.warn('Could not read Forge context (likely local dev mode):', err);
-      // In local dev without Forge iframe, check URL params or default to view
       const urlParams = new URLSearchParams(window.location.search);
       setIsEditMode(urlParams.get('mode') === 'edit');
       setLoading(false);

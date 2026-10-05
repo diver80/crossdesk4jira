@@ -1,5 +1,5 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { invoke, requestCredentials, view } from '@forge/bridge';
+import { useEffect, useState, useCallback } from 'react';
+import { invoke } from '@forge/bridge';
 import Spinner from '@atlaskit/spinner';
 import SectionMessage from '@atlaskit/section-message';
 import Button from '@atlaskit/button/new';
@@ -43,19 +43,13 @@ export default function GadgetView() {
   const handleReauth = async () => {
     try {
       setReauthorizing(true);
-      await requestCredentials('atlassian-oauth');
+      await invoke('connectAccount');
       await fetchIssues(true);
     } catch (err: any) {
       console.error('Re-authentication failed:', err);
     } finally {
       setReauthorizing(false);
     }
-  };
-
-  const handleOpenConfig = async () => {
-    // If running in Forge, users can use the gadget dropdown to Configure,
-    // or we can refresh context
-    await fetchIssues(true);
   };
 
   // Status Lozenge appearance mapping

@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { invoke, requestCredentials, view } from '@forge/bridge';
+import { useEffect, useState, ChangeEvent } from 'react';
+import { invoke, view } from '@forge/bridge';
 import Button from '@atlaskit/button/new';
 import Textfield from '@atlaskit/textfield';
 import { Checkbox } from '@atlaskit/checkbox';
@@ -92,7 +92,7 @@ export default function GadgetEditConfig() {
     try {
       setConnectingAccount(true);
       setErrorMessage(null);
-      await requestCredentials('atlassian-oauth');
+      await invoke('connectAccount');
       // After OAuth flow completes, refresh sites
       await fetchSites();
     } catch (err: any) {
@@ -215,7 +215,7 @@ export default function GadgetEditConfig() {
         <Textfield
           name="clusterTitle"
           value={clusterTitle}
-          onChange={(e: React.ChangeEvent<HTMLInputElement>) => setClusterTitle(e.target.value)}
+          onChange={(e: ChangeEvent<HTMLInputElement>) => setClusterTitle(e.target.value)}
           placeholder="e.g. EMEA Staging & Production"
         />
         <p style={{ fontSize: '11px', color: '#6B778C', marginTop: '4px' }}>
@@ -231,7 +231,7 @@ export default function GadgetEditConfig() {
         <Textfield
           name="jql"
           value={jql}
-          onChange={(e: React.ChangeEvent<HTMLInputElement>) => setJql(e.target.value)}
+          onChange={(e: ChangeEvent<HTMLInputElement>) => setJql(e.target.value)}
           placeholder={DEFAULT_JQL}
         />
         <p style={{ fontSize: '11px', color: '#6B778C', marginTop: '4px' }}>
@@ -264,7 +264,7 @@ export default function GadgetEditConfig() {
             Connected Atlassian Accounts & Target Sites
           </label>
           <Button
-            appearance="subtle-link"
+            appearance="subtle"
             onClick={handleConnectAccount}
             isDisabled={connectingAccount}
           >

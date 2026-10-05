@@ -23,7 +23,7 @@ Build a Jira Cloud Dashboard Gadget using Atlassian Forge (Custom UI) that aggre
   - Set Callback URL to Forge external callback: `https://oauth-3legged.services.atlassian.com/v1/authorize/callback`.
   - Record `Client ID` and `Client Secret`.
 
-- [ ] **Task 1.2: Initialize Forge App Directory**
+- [x] **Task 1.2: Initialize Forge App Directory**
   - Create Forge app scaffold with Custom UI:
     ```bash
     forge create --template custom-ui
@@ -34,7 +34,7 @@ Build a Jira Cloud Dashboard Gadget using Atlassian Forge (Custom UI) that aggre
     forge variables set ATLASSIAN_CLIENT_SECRET <client-secret>
     ```
 
-- [ ] **Task 1.3: Define `manifest.yml`**
+- [x] **Task 1.3: Define `manifest.yml`**
   - Declare `jira:dashboardGadget` module with `key`, `title`, `description`, `thumbnail`, `resource`, `resolver`, and `edit.resource`.
   - Declare `providers.auth` for key `atlassian-oauth` pointing to `remotes` `atlassian-auth` (`https://auth.atlassian.com`) and `atlassian-apis` (`https://api.atlassian.com`).
   - Configure `retrieveProfile` to resolve `id: account_id` and `displayName: email`.
@@ -44,18 +44,18 @@ Build a Jira Cloud Dashboard Gadget using Atlassian Forge (Custom UI) that aggre
 
 ## Phase 2: Backend Resolver Implementation (`src/resolvers/`)
 
-- [ ] **Task 2.1: Multi-Account Discovery & Validation Handler**
+- [x] **Task 2.1: Multi-Account Discovery & Validation Handler**
   - Implement `getAllAccessibleSites`:
     - Call `provider.listAccounts()`.
     - For each account, invoke `/oauth/token/accessible-resources`.
     - For each returned site, probe `/ex/jira/${site.id}/rest/api/3/myself` to test Jira product license and permission.
     - Return a flat structure: `[{ accountId, accountEmail, siteId, siteName, siteUrl, avatarUrl, hasJiraAccess }]`.
 
-- [ ] **Task 2.2: ADF Text Extraction Helper**
+- [x] **Task 2.2: ADF Text Extraction Helper**
   - Implement recursive parser `extractAdfText(doc)` to extract plain-text preview strings from Atlassian Document Format (ADF) payloads for comments.
   - Enforce character cap (e.g. 120 chars + `…`).
 
-- [ ] **Task 2.3: Targeted Issue Aggregator Resolver**
+- [x] **Task 2.3: Targeted Issue Aggregator Resolver**
   - Implement `getGadgetIssues`:
     - Read gadget configuration from `req.context.extension.gadgetConfiguration`.
     - If `selectedSites` is empty, return `{ status: 'NEEDS_CONFIG' }`.
@@ -70,12 +70,12 @@ Build a Jira Cloud Dashboard Gadget using Atlassian Forge (Custom UI) that aggre
 
 ## Phase 3: Frontend Gadget UI (`static/gadget/src/`)
 
-- [ ] **Task 3.1: Entry Point & Routing**
+- [x] **Task 3.1: Entry Point & Routing**
   - Inspect `view.getContext()` to identify `context.extension.entryPoint`.
   - If `entryPoint === 'edit'`, mount `<GadgetEditConfig />`.
   - Else, mount `<GadgetView />`.
 
-- [ ] **Task 3.2: Configuration Component (`<GadgetEditConfig />`)**
+- [x] **Task 3.2: Configuration Component (`<GadgetEditConfig />`)**
   - Inputs:
     - Cluster Title text field (e.g. "Core Team", "Customer Staging").
     - JQL input (default: `assignee = currentUser() AND resolution = Unresolved ORDER BY updated DESC`).
@@ -88,7 +88,7 @@ Build a Jira Cloud Dashboard Gadget using Atlassian Forge (Custom UI) that aggre
     ```
   - Cancel button calling `await view.close()`.
 
-- [ ] **Task 3.3: Gadget View Component (`<GadgetView />`)**
+- [x] **Task 3.3: Gadget View Component (`<GadgetView />`)**
   - Handle view states:
     - **Loading:** Render `@atlaskit/spinner`.
     - **Unconfigured:** Empty state prompting user to click "Configure".
