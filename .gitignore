@@ -1,0 +1,6 @@
+node_modules/
+dist/
+.env
+static/gadget/node_modules/
+static/gadget/dist/
+.forge/

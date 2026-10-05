@@ -1,0 +1,25 @@
+{
+  "name": "crossdesk4jira",
+  "version": "1.0.0",
+  "description": "Cross-Site Work Items Dashboard Gadget for Jira Cloud",
+  "private": true,
+  "scripts": {
+    "build": "npm run build:frontend && npm run build:backend",
+    "build:backend": "tsc --project tsconfig.json",
+    "build:frontend": "cd static/gadget && npm run build",
+    "type-check": "tsc --noEmit && cd static/gadget && npm run type-check",
+    "test": "jest",
+    "test:watch": "jest --watch"
+  },
+  "dependencies": {
+    "@forge/api": "^5.0.0",
+    "@forge/resolver": "^1.6.0"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.14",
+    "@types/node": "^22.10.1",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.2.5",
+    "typescript": "^5.7.2"
+  }
+}
