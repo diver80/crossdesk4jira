@@ -1,5 +1,5 @@
 app:
-  id: ari:cloud:ecosystem::app/8014e024-841c-4e53-8347-e9ea99323fd7
+  id: ari:cloud:ecosystem::app/576ddc3e-b4a8-488d-945e-9844475e62ad
   runtime:
     name: nodejs22.x
 
@@ -7,7 +7,8 @@ modules:
   jira:dashboardGadget:
     - key: crossdesk4jira-gadget
       title: Cross-Site Work Items
-      description: Aggregates Jira issues across multiple Atlassian Cloud sites and accounts.
+      description: Aggregates Jira issues across multiple Atlassian Cloud sites and
+        accounts.
       thumbnail: https://developer.atlassian.com/platform/forge/images/icons/issue.svg
       resource: main-gadget
       edit:
