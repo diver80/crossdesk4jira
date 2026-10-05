@@ -111,7 +111,7 @@ async function fetchIssuesForSite(
       };
     }
 
-    const data: RawIssueResponse = await res.json();
+    const data = (await res.json()) as RawIssueResponse;
     const rawIssues = data.issues || [];
 
     const issues: NormalizedIssue[] = rawIssues.map(raw => {

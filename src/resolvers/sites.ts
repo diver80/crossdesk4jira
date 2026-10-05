@@ -38,7 +38,7 @@ export async function fetchSitesForAccounts(provider: ForgeAuthProvider): Promis
         continue;
       }
 
-      const sites: RawAccessibleResource[] = await res.json();
+      const sites = (await res.json()) as RawAccessibleResource[];
       for (const site of sites) {
         let hasJiraAccess = false;
         try {
