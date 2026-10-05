@@ -305,6 +305,11 @@ export default function GadgetView() {
             {clusterTitle}
           </h3>
           <Badge appearance="added">{allIssues.length} issues</Badge>
+          {data.truncated && (
+            <Tooltip content={`Showing the ${data.maxItems ?? allIssues.length} most recently updated work items. Raise "Maximum Work Items" in the gadget settings to see more.`}>
+              <span style={{ fontSize: '11px', color: '#6B778C' }}>limit reached</span>
+            </Tooltip>
+          )}
           {reloading && <Spinner size="small" />}
         </div>
         <div>

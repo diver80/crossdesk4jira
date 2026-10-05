@@ -45,6 +45,16 @@ interface RawIssueResponse {
   }>;
 }
 
+export const DEFAULT_MAX_ITEMS = 25;
+/** Jira's search/jql returns at most 100 issues with fields per page. */
+export const MAX_ITEMS_LIMIT = 100;
+
+export function normalizeMaxItems(value: unknown): number {
+  const n = typeof value === 'string' ? Number(value) : value;
+  if (typeof n !== 'number' || !Number.isFinite(n)) return DEFAULT_MAX_ITEMS;
+  return Math.min(MAX_ITEMS_LIMIT, Math.max(1, Math.floor(n)));
+}
+
 function mapStatusCategory(catKey?: string): 'new' | 'indeterminate' | 'done' | 'undefined' {
   if (catKey === 'new') return 'new';
   if (catKey === 'indeterminate') return 'indeterminate';
@@ -173,6 +183,28 @@ async function fetchIssuesForSite(
   }
 }
 
+const updatedTime = (issue: NormalizedIssue) => new Date(issue.updated).getTime() || 0;
+
+/**
+ * Keeps the `maxItems` most recently updated issues across all sites while
+ * preserving per-site grouping and order. A site that returned exactly
+ * `maxItems` may have more matches, so that also counts as truncated.
+ */
+function keepMostRecent(results: SiteResult[], maxItems: number): { trimmed: SiteResult[]; truncated: boolean } {
+  const all = results.flatMap(r => r.issues);
+  const siteHitLimit = results.some(r => r.issues.length >= maxItems);
+  if (all.length <= maxItems) {
+    return { trimmed: results, truncated: siteHitLimit };
+  }
+  const keep = new Set(
+    [...all].sort((a, b) => updatedTime(b) - updatedTime(a)).slice(0, maxItems)
+  );
+  return {
+    trimmed: results.map(r => ({ ...r, issues: r.issues.filter(i => keep.has(i)) })),
+    truncated: true
+  };
+}
+
 export async function aggregateIssuesFromSites(
   config: GadgetConfiguration | undefined,
   provider: ForgeAuthProvider
@@ -186,8 +218,12 @@ export async function aggregateIssuesFromSites(
 
   const jql = config.jql || 'assignee = currentUser() AND resolution = Unresolved ORDER BY updated DESC';
 
+  const maxItems = normalizeMaxItems(config.maxItems);
+
+  // Each site may hold all of the most recent items, so fetch up to the total
+  // limit per site and trim after merging.
   const promises = config.selectedSites.map(site =>
-    fetchIssuesForSite(site, jql, provider)
+    fetchIssuesForSite(site, jql, provider, maxItems)
   );
 
   const settled = await Promise.allSettled(promises);
@@ -206,10 +242,14 @@ export async function aggregateIssuesFromSites(
     };
   });
 
+  const { trimmed, truncated } = keepMostRecent(results, maxItems);
+
   return {
     status: 'OK',
     clusterTitle: config.clusterTitle,
     visibleColumns: config.visibleColumns,
-    results
+    maxItems,
+    truncated,
+    results: trimmed
   };
 }

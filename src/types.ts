@@ -12,6 +12,8 @@ export interface GadgetConfiguration {
   selectedSites: SelectedSite[];
   visibleColumns: string[];
   refreshIntervalMinutes?: number;
+  /** Maximum work items shown in total across all sites (1-100, default 25). */
+  maxItems?: number;
 }
 
 export interface AccessibleSite {
@@ -72,5 +74,9 @@ export interface GadgetIssuesResponse {
   message?: string;
   clusterTitle?: string;
   visibleColumns?: string[];
+  /** Effective limit after defaulting/clamping. */
+  maxItems?: number;
+  /** True if more matching work items exist than are shown. */
+  truncated?: boolean;
   results: SiteResult[];
 }

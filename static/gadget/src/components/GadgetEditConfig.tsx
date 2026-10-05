@@ -10,6 +10,8 @@ import { AccessibleSite, GadgetConfiguration, SelectedSite } from '../types';
 import { ConnectedAccount, CONNECTED_APPS_URL, openAtlassianSignIn } from '../oauth';
 
 const DEFAULT_JQL = 'assignee = currentUser() AND resolution = Unresolved ORDER BY updated DESC';
+const DEFAULT_MAX_ITEMS = 25;
+const MAX_ITEMS_LIMIT = 100;
 
 const AVAILABLE_COLUMNS = [
   { key: 'status', label: 'Status' },
@@ -33,6 +35,7 @@ export default function GadgetEditConfig() {
   // Form State
   const [clusterTitle, setClusterTitle] = useState('Cross-Site Work Items');
   const [jql, setJql] = useState(DEFAULT_JQL);
+  const [maxItems, setMaxItems] = useState(String(DEFAULT_MAX_ITEMS));
   const [visibleColumns, setVisibleColumns] = useState<string[]>([
     'status',
     'priority',
@@ -44,6 +47,11 @@ export default function GadgetEditConfig() {
 
   // Discovered Sites
   const [accessibleSites, setAccessibleSites] = useState<AccessibleSite[]>([]);
+
+  const parsedMaxItems = (() => {
+    const n = Number(maxItems);
+    return Number.isInteger(n) && n >= 1 && n <= MAX_ITEMS_LIMIT ? n : null;
+  })();
 
   const makeSiteKey = (accountId: string, siteId: string) => `${accountId}::${siteId}`;
 
@@ -64,6 +72,7 @@ export default function GadgetEditConfig() {
       if (savedConfig) {
         if (savedConfig.clusterTitle !== undefined) setClusterTitle(savedConfig.clusterTitle);
         if (savedConfig.jql !== undefined) setJql(savedConfig.jql);
+        if (typeof savedConfig.maxItems === 'number') setMaxItems(String(savedConfig.maxItems));
         if (Array.isArray(savedConfig.visibleColumns)) setVisibleColumns(savedConfig.visibleColumns);
         if (Array.isArray(savedConfig.selectedSites)) {
           const keys = new Set(savedConfig.selectedSites.map(s => makeSiteKey(s.accountId, s.siteId)));
@@ -197,7 +206,8 @@ export default function GadgetEditConfig() {
         jql: jql.trim() || DEFAULT_JQL,
         selectedSites,
         visibleColumns,
-        refreshIntervalMinutes: 15
+        refreshIntervalMinutes: 15,
+        maxItems: parsedMaxItems ?? DEFAULT_MAX_ITEMS
       };
 
       await view.submit(config);
@@ -282,6 +292,29 @@ export default function GadgetEditConfig() {
         />
         <p style={{ fontSize: '11px', color: '#6B778C', marginTop: '4px' }}>
           Filter executed across all selected sites. Ensure field names exist across target instances.
+        </p>
+      </div>
+
+      {/* Max work items */}
+      <div style={{ marginBottom: '20px' }}>
+        <label style={{ display: 'block', fontWeight: 600, fontSize: '12px', marginBottom: '6px', color: '#6B778C' }}>
+          Maximum Work Items
+        </label>
+        <div style={{ maxWidth: '120px' }}>
+          <Textfield
+            name="maxItems"
+            type="number"
+            min={1}
+            max={MAX_ITEMS_LIMIT}
+            value={maxItems}
+            isInvalid={parsedMaxItems === null}
+            onChange={(e: ChangeEvent<HTMLInputElement>) => setMaxItems(e.target.value)}
+          />
+        </div>
+        <p style={{ fontSize: '11px', color: parsedMaxItems === null ? '#AE2E24' : '#6B778C', marginTop: '4px' }}>
+          {parsedMaxItems === null
+            ? `Enter a whole number between 1 and ${MAX_ITEMS_LIMIT}.`
+            : 'Total across all selected sites. The most recently updated work items are shown.'}
         </p>
       </div>
 
@@ -437,7 +470,7 @@ export default function GadgetEditConfig() {
         <Button
           appearance="primary"
           onClick={handleSave}
-          isDisabled={saving || selectedSiteKeys.size === 0}
+          isDisabled={saving || selectedSiteKeys.size === 0 || parsedMaxItems === null}
         >
           {saving ? 'Saving...' : 'Save Configuration'}
         </Button>
