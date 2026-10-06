@@ -8,15 +8,44 @@ export function newState(): string {
   return randomBytes(32).toString('hex');
 }
 
+/** Encodes customer webtrigger destination and state secret for the public relay. */
+export function encodeRelayState(targetWebtriggerUrl: string, stateSecret: string): string {
+  const payload = JSON.stringify({ t: targetWebtriggerUrl, s: stateSecret });
+  return Buffer.from(payload, 'utf8')
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+}
+
+/** Decodes a relay-encoded state parameter if present. */
+export function tryDecodeRelayState(state: string): { target: string; secret: string } | undefined {
+  try {
+    const raw = state.replace(/-/g, '+').replace(/_/g, '/');
+    const json = JSON.parse(Buffer.from(raw, 'base64').toString('utf8'));
+    if (typeof json.t === 'string' && typeof json.s === 'string' && isWellFormedState(json.s)) {
+      return { target: json.t, secret: json.s };
+    }
+  } catch {
+    // not a relay state
+  }
+  return undefined;
+}
+
 export async function startAuthorization(
   store: OAuthStore,
   config: OAuthClientConfig,
   userId: string,
   now: number,
-  state: string = newState()
+  state: string = newState(),
+  webtriggerUrl?: string
 ): Promise<{ authorizeUrl: string }> {
   await store.createState(state, userId, now);
-  return { authorizeUrl: buildAuthorizeUrl(config, state) };
+  const outgoingState =
+    webtriggerUrl && config.redirectUri !== webtriggerUrl
+      ? encodeRelayState(webtriggerUrl, state)
+      : state;
+  return { authorizeUrl: buildAuthorizeUrl(config, outgoingState) };
 }
 
 export interface CallbackRequest {
@@ -43,12 +72,18 @@ export async function completeAuthorization(
   now: number
 ): Promise<CallbackResult> {
   const q = request.queryParameters;
-  const state = first(q, 'state');
+  let state = first(q, 'state');
   const code = first(q, 'code');
   const error = first(q, 'error');
 
   if (!state) {
     return { ok: false, title: 'Invalid request', message: 'The sign-in response is missing its state parameter.' };
+  }
+
+  // Handle direct relay state fallback if browser landed directly without relay unwrapping
+  if (!isWellFormedState(state)) {
+    const decoded = tryDecodeRelayState(state);
+    if (decoded) state = decoded.secret;
   }
 
   const pending = isWellFormedState(state) ? await store.consumeState(state, now) : undefined;

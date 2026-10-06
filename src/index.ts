@@ -5,7 +5,7 @@ import { aggregateIssuesFromSites } from './resolvers/issues';
 import { GadgetConfiguration, GadgetIssuesResponse } from './types';
 import { TokenAuthProvider } from './oauth/provider';
 import { buildCallbackResponse, completeAuthorization, startAuthorization } from './oauth/flow';
-import { clientCredentials, forgeHttp, forgeStore, oauthConfig } from './oauth/runtime';
+import { callbackUrl, clientCredentials, forgeHttp, forgeStore, oauthConfig } from './oauth/runtime';
 import { isSafeAccountId } from './utils/validation';
 
 /** The parts of the Forge resolver context this app reads. */
@@ -49,7 +49,8 @@ resolver.define('getGadgetIssues', async (req): Promise<GadgetIssuesResponse> =>
 });
 
 resolver.define('startOAuth', async req => {
-  return startAuthorization(forgeStore(), await oauthConfig(), requireUser(req), Date.now());
+  const [cfg, webtrigger] = await Promise.all([oauthConfig(), callbackUrl()]);
+  return startAuthorization(forgeStore(), cfg, requireUser(req), Date.now(), undefined, webtrigger);
 });
 
 resolver.define('disconnectAccount', async req => {

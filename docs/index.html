@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>crossdesk4jira — Secure Authorization Redirect</title>
+  <style>
+    :root {
+      --primary: #0052CC;
+      --text: #172B4D;
+      --subtle: #626F86;
+      --bg: #F7F8F9;
+      --card-bg: #FFFFFF;
+      --border: #DFE1E6;
+      --danger: #AE2E24;
+    }
+    body {
+      margin: 0;
+      padding: 40px 16px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      min-height: 100vh;
+      box-sizing: border-box;
+    }
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 32px;
+      max-width: 520px;
+      width: 100%;
+      box-shadow: 0 1px 3px rgba(9, 30, 66, 0.08);
+      text-align: center;
+    }
+    .spinner {
+      width: 36px;
+      height: 36px;
+      border: 3px solid #EBECF0;
+      border-top-color: var(--primary);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin: 0 auto 20px;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    h1 {
+      font-size: 20px;
+      margin: 0 0 10px;
+      color: var(--text);
+    }
+    p {
+      font-size: 14px;
+      line-height: 1.5;
+      color: var(--subtle);
+      margin: 0 0 20px;
+    }
+    .info-box {
+      background: #F4F5F7;
+      border-radius: 6px;
+      padding: 16px;
+      text-align: left;
+      font-size: 12px;
+      color: var(--subtle);
+      line-height: 1.5;
+      margin-bottom: 20px;
+    }
+    .info-box strong {
+      color: var(--text);
+    }
+    .error-box {
+      display: none;
+      background: #FFEBE6;
+      border-left: 4px solid var(--danger);
+      padding: 12px 16px;
+      border-radius: 4px;
+      text-align: left;
+      color: #BF2600;
+      font-size: 13px;
+      margin-bottom: 20px;
+    }
+    a {
+      color: var(--primary);
+      text-decoration: none;
+    }
+    a:hover {
+      text-decoration: underline;
+    }
+    .footer {
+      font-size: 11px;
+      color: #8993A4;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div id="spinner" class="spinner"></div>
+    <h1 id="title">Connecting to Jira...</h1>
+    <p id="status-text">Redirecting you securely back to your private Jira Cloud instance.</p>
+
+    <div id="error" class="error-box"></div>
+
+    <div class="info-box">
+      <strong>🔒 Transparent & Stateless Relay</strong><br>
+      This page is an open-source redirect helper for the <em>crossdesk4jira</em> Jira Cloud app. It runs entirely in your browser:
+      <ul style="margin: 8px 0 0; padding-left: 20px;">
+        <li>Zero tracking, zero cookies, zero analytics.</li>
+        <li>No user credentials, passwords, or tokens are ever processed or stored here.</li>
+        <li>Forwards strictly to verified Atlassian Forge domains (<code>*.hello.atlassian.net</code>).</li>
+      </ul>
+    </div>
+
+    <div class="footer">
+      Powered by <a href="https://github.com/diver80/crossdesk4jira" target="_blank" rel="noopener">crossdesk4jira</a> · Open Source Atlassian Forge Gadget
+    </div>
+  </div>
+
+  <script>
+    (function() {
+      const titleEl = document.getElementById('title');
+      const textEl = document.getElementById('status-text');
+      const spinnerEl = document.getElementById('spinner');
+      const errorEl = document.getElementById('error');
+
+      function showError(msg) {
+        spinnerEl.style.display = 'none';
+        titleEl.textContent = 'Connection Redirect Failed';
+        titleEl.style.color = '#AE2E24';
+        textEl.textContent = 'The sign-in response could not be securely redirected.';
+        errorEl.textContent = msg;
+        errorEl.style.display = 'block';
+      }
+
+      try {
+        const params = new URLSearchParams(window.location.search);
+        const code = params.get('code');
+        const stateParam = params.get('state');
+        const error = params.get('error');
+        const errorDescription = params.get('error_description');
+
+        if (!stateParam) {
+          showError('Missing OAuth state parameter. Please restart sign-in from your Jira gadget.');
+          return;
+        }
+
+        // Unpack the relay state payload:
+        // Format: JSON base64url encoded { t: "<forgeWebtriggerUrl>", s: "<originalStateSecret>" }
+        // or legacy fallback "targetUrl:::stateSecret"
+        let targetUrl = '';
+        let originalState = '';
+
+        try {
+          const raw = stateParam.replace(/-/g, '+').replace(/_/g, '/');
+          const json = JSON.parse(decodeURIComponent(escape(atob(raw))));
+          targetUrl = json.t || '';
+          originalState = json.s || '';
+        } catch (e) {
+          if (stateParam.includes(':::')) {
+            const parts = stateParam.split(':::');
+            targetUrl = parts[0];
+            originalState = parts[1];
+          }
+        }
+
+        if (!targetUrl || !originalState) {
+          showError('Invalid or corrupted state parameter. Please restart sign-in from your Jira gadget.');
+          return;
+        }
+
+        // Security check: Target MUST be an https URL on an Atlassian Forge domain
+        let parsedTarget;
+        try {
+          parsedTarget = new URL(targetUrl);
+        } catch (e) {
+          showError('Invalid redirect destination URL.');
+          return;
+        }
+
+        if (parsedTarget.protocol !== 'https:') {
+          showError('Security violation: Redirect target must use HTTPS protocol.');
+          return;
+        }
+
+        const host = parsedTarget.hostname.toLowerCase();
+        const isAllowedDomain = host.endsWith('.hello.atlassian.net') || host.endsWith('.hello.atlassian-dev.net');
+        if (!isAllowedDomain) {
+          showError('Security violation: Redirect target domain is not an authorized Atlassian Forge domain (' + host + ').');
+          return;
+        }
+
+        // Build the target forward URL preserving all OAuth response parameters
+        const forwardUrl = new URL(targetUrl);
+        forwardUrl.searchParams.set('state', originalState);
+        if (code) forwardUrl.searchParams.set('code', code);
+        if (error) forwardUrl.searchParams.set('error', error);
+        if (errorDescription) forwardUrl.searchParams.set('error_description', errorDescription);
+
+        // Immediate forward
+        window.location.replace(forwardUrl.toString());
+      } catch (err) {
+        showError('Unexpected browser error: ' + (err.message || 'unknown failure'));
+      }
+    })();
+  </script>
+</body>
+</html>

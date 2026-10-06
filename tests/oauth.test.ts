@@ -1,5 +1,12 @@
 import { MAX_PENDING_STATES, OAuthStore, STATE_TTL_MS } from '../src/oauth/store';
-import { buildCallbackResponse, completeAuthorization, renderCallbackPage, startAuthorization } from '../src/oauth/flow';
+import {
+  buildCallbackResponse,
+  completeAuthorization,
+  encodeRelayState,
+  renderCallbackPage,
+  startAuthorization,
+  tryDecodeRelayState
+} from '../src/oauth/flow';
 import { TokenAuthProvider } from '../src/oauth/provider';
 import { HttpFetch, HttpResponse, KeyValueStore, OAuthClientConfig } from '../src/oauth/types';
 import { aggregateIssuesFromSites } from '../src/resolvers/issues';
@@ -58,6 +65,26 @@ describe('OAuth authorization flow', () => {
     expect(url.searchParams.get('response_type')).toBe('code');
     expect(kv.secret.get(`oauth-state:${S1}`)).toEqual({ userId: 'jira-user-1', createdAt: NOW });
     expect(kv.plain.size).toBe(0);
+  });
+
+  it('encodes and decodes relay state correctly', () => {
+    const webtrigger = 'https://install-123.hello.atlassian.net/x1/token';
+    const encoded = encodeRelayState(webtrigger, S1);
+    const decoded = tryDecodeRelayState(encoded);
+    expect(decoded).toEqual({ target: webtrigger, secret: S1 });
+  });
+
+  it('packs webtrigger target into state when redirectUri is a public relay', async () => {
+    const relayConfig = { ...CONFIG, redirectUri: 'https://diver80.github.io/crossdesk4jira/' };
+    const localWebtrigger = 'https://install-123.hello.atlassian.net/x1/token';
+    const { authorizeUrl } = await startAuthorization(store, relayConfig, 'jira-user-1', NOW, S1, localWebtrigger);
+    const url = new URL(authorizeUrl);
+
+    expect(url.searchParams.get('redirect_uri')).toBe('https://diver80.github.io/crossdesk4jira/');
+    const outgoingState = url.searchParams.get('state')!;
+    expect(outgoingState).not.toBe(S1);
+    expect(tryDecodeRelayState(outgoingState)).toEqual({ target: localWebtrigger, secret: S1 });
+    expect(kv.secret.get(`oauth-state:${S1}`)).toEqual({ userId: 'jira-user-1', createdAt: NOW });
   });
 
   it('exchanges the code, stores tokens for the initiating user and consumes the state', async () => {
